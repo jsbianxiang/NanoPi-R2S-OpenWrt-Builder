@@ -69,7 +69,10 @@ PACKAGES=""
 #   设备上 /etc/init.d/uhttpd 都不存在，web UI 完全无法访问。
 # `luci` 集合包（官方 luci feed）会带齐：uhttpd + luci-base +
 #   luci-mod-admin-full + luci-theme-bootstrap + rpcd 组件。
+# `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上（见
+#   firmware-selector 官方页 Installed Packages），保持与官方基线一致。
 PACKAGES="$PACKAGES luci"
+PACKAGES="$PACKAGES luci-app-attendedsysupgrade"
 PACKAGES="$PACKAGES curl"
 PACKAGES="$PACKAGES bind-tools"
 PACKAGES="$PACKAGES ca-certificates"
