@@ -62,6 +62,14 @@ cat repositories
 # 注意：OpenWrt 官方源不含代理类插件，也不含 ImmortalWrt 系应用
 #       （argon / diskman / cpufreq 等），这些包全部来自注入的第三方源。
 PACKAGES=""
+# ---- LuCI web 界面（关键！）----
+# ⚠ 官方 OpenWrt 的 Image Builder 默认包（DEFAULT_PACKAGES）**不含 LuCI/uhttpd**
+#   （ImmortalWrt 的 IB 默认带，官方不带——迁移差异，实机踩坑验证）。
+#   只装 luci-i18n-*/luci-app-* 会把 luci-base 拉进来但没有 web 服务器，
+#   设备上 /etc/init.d/uhttpd 都不存在，web UI 完全无法访问。
+# `luci` 集合包（官方 luci feed）会带齐：uhttpd + luci-base +
+#   luci-mod-admin-full + luci-theme-bootstrap + rpcd 组件。
+PACKAGES="$PACKAGES luci"
 PACKAGES="$PACKAGES curl"
 PACKAGES="$PACKAGES bind-tools"
 PACKAGES="$PACKAGES ca-certificates"

@@ -98,11 +98,15 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
   不允许从 WAN 侧访问后台；刷机后请从 **LAN 口**访问。详见下文「WAN 入站防火墙」章节。
 - **网口（R2S 本体）**：`eth0` 为 WAN（默认 DHCP），`eth1` 为 LAN，
   LAN 地址为工作流中填写的 `custom_router_ip`。对应关系见下节。
-- **默认主题：Bootstrap**（OpenWrt 官方默认）。
+- **默认主题：Bootstrap**（`luci` 集合包自带）。
   ⚠ **不默认安装 Argon 主题**：dllkids 源的 argon 系（ImmortalWrt 生态编译）
   在官方 OpenWrt 25.12 的 LuCI 上实测会导致 web UI 无法进入
   （argon 包自带 uci-defaults 自动切换默认主题，渲染失败连登录页都挂）。
   仍想尝试见 `rockchip/build.sh` 中被注释的 argon 行与说明。
+- **LuCI web 界面**：通过官方 `luci` 集合包显式安装（uhttpd + luci-base +
+  luci-mod-admin-full + Bootstrap）。⚠ 官方 IB 默认包**不含** LuCI/uhttpd
+  （ImmortalWrt 的 IB 默认带，官方不带）——只装 `luci-i18n-*` / `luci-app-*`
+  会拉进 luci-base 但没有 web 服务器，设备上 `/etc/init.d/uhttpd` 都不存在。
 - **中国大陆优化**（官方默认面向全球，本项目做了以下本土化调整）：
   - **中文界面**：`luci-i18n-base-zh-cn` 预装（浏览器语言为中文时 LuCI 直接显示简体）；
   - **时区**：`Asia/Shanghai`（CST-8，官方默认 UTC）；
