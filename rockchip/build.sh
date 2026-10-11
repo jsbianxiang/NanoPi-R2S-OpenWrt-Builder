@@ -65,13 +65,14 @@ PACKAGES=""
 #   设备上 /etc/init.d/uhttpd 都不存在，web UI 完全无法访问。
 # `luci` 集合包（官方 luci feed）会带齐：uhttpd + luci-base +
 #   luci-mod-admin-full + luci-theme-bootstrap + rpcd 组件。
-# `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上。
+# `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上（见下方中文包一节，
+#   它与 luci-i18n-attendedsysupgrade-zh-cn 一起列出）。
 # ✔ 已核对官方 25.12.5 rockchip/armv8 manifest（openwrt-25.12.5-rockchip-armv8.manifest，
 #   共 128 包）：官方固件 = IB 默认包 + `luci` + `luci-app-attendedsysupgrade`，
 #   其余 luci-light/luci-ssl/uhttpd/rpcd-mod-* 均为这两个元包的自动依赖。
-#   即下方前两行预置的就是官方 Installed Packages 基线，其后都是本项目的增量。
+#   ⇒ 官方 Installed Packages 基线 = `luci`（下一行）+ `luci-app-attendedsysupgrade`
+#     （见下方中文包一节），基线之外的行都是本项目的增量。
 PACKAGES="$PACKAGES luci"
-PACKAGES="$PACKAGES luci-app-attendedsysupgrade"
 PACKAGES="$PACKAGES curl"
 PACKAGES="$PACKAGES bind-tools"
 PACKAGES="$PACKAGES ca-certificates"
@@ -82,6 +83,10 @@ PACKAGES="$PACKAGES openssh-sftp-server"
 PACKAGES="$PACKAGES luci-i18n-base-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
+# 官方基线第 2 包（见上方说明）+ 其简体中文语言包（官方 luci feed，已核实存在）
+PACKAGES="$PACKAGES luci-app-attendedsysupgrade"
+PACKAGES="$PACKAGES luci-i18n-attendedsysupgrade-zh-cn"
+
 # ⚠ 第三方源（dllkids）里的 app 包是中文原生的，**没有**独立语言包：
 #   - luci-app-diskman / luci-app-cpufreq（27.150.x，默认不装，见下方注释行）
 #     包内**自带简体中文**，若再显式安装同名的独立 i18n 包，apk 会因文件冲突报
