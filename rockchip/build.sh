@@ -73,21 +73,25 @@ PACKAGES="$PACKAGES luci-i18n-base-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
 # ⚠ 第三方源（dllkids）里的 app 包是中文原生的，**没有**独立语言包：
-#   - luci-app-diskman / luci-app-cpufreq / luci-app-argon-config（27.150.x）
+#   - luci-app-diskman / luci-app-cpufreq（27.150.x）
 #     包内**自带简体中文**，若再显式安装同名的独立 i18n 包，apk 会因文件冲突报
 #     ERROR: luci-i18n-xxx-zh-cn-...: trying to overwrite ... owned by luci-app-xxx-...
-#     直接中断 make image（package_install 返回 Error 3）。故这三个只装 app 包。
-#   - luci-theme-argon（27.246.x）为纯主题，无 i18n 包。
+#     直接中断 make image（package_install 返回 Error 3）。故只装 app 包。
 #   - luci-app-nikki 等其余第三方应用同理，不要加 luci-i18n-<名>-zh-cn。
-# ✓ 下列 4 个包在官方 OpenWrt 源中不存在、但 dllkids 源里确有 apk
-#   （已逐一核实：luci-theme-argon-27.246.x、luci-app-argon-config /
-#   luci-app-cpufreq / luci-app-diskman-27.150.x）——
+# ⚠✗ 不默认安装 luci-theme-argon / luci-app-argon-config（实机已验证）：
+#   dllkids 的 argon 是 ImmortalWrt 生态编译包，在官方 OpenWrt 25.12 的 LuCI 上
+#   会导致 web UI 无法进入（argon 包自带 uci-defaults 自动把默认主题切成
+#   argon，渲染失败则连登录页都挂）。默认走官方 Bootstrap 主题。
+#   仍想尝试的话取消下两行注释，并在 99-custom.sh 里显式钉死
+#   luci.main.mediaurlbase='/luci-static/bootstrap' 以便失败时可恢复。
+#PACKAGES="$PACKAGES luci-theme-argon"
+#PACKAGES="$PACKAGES luci-app-argon-config"
+# ✓ 下列 2 个包在官方 OpenWrt 源中不存在、但 dllkids 源里确有 apk
+#   （已核实：luci-app-diskman / luci-app-cpufreq-27.150.x）——
 #   前提是 build.sh 注入了 dllkids 源（见下方注入逻辑）；
-#   若将来移除该源注入，必须同步删除这 4 行，否则 make image 找不到包。
+#   若将来移除该源注入，必须同步删除这 2 行，否则 make image 找不到包。
 PACKAGES="$PACKAGES luci-app-diskman"
 PACKAGES="$PACKAGES luci-app-cpufreq"
-PACKAGES="$PACKAGES luci-theme-argon"
-PACKAGES="$PACKAGES luci-app-argon-config"
 PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
 # 文件管理器（OpenWrt 官方源，含独立 i18n 包）
 PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"

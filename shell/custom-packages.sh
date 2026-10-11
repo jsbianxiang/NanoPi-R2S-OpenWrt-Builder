@@ -31,11 +31,14 @@
 #      base/luci/packages/routing/telephony 五个 feed）与 dllkids 第三方源
 #      逐一校验。两处都不存在的 oled / 3cat / 3ginfo-lite / appfilter 已剔除，
 #      避免「取消注释即构建失败」。
-#   6. 【已内置中文的 app 包】argon-config / cpufreq / diskman 这三个 app 包
+#   6. 【已内置中文的 app 包】cpufreq / diskman 这两个 app 包
 #      （版本 27.150.x，仅第三方源提供）**自带简体中文**，启用它们时**不能**再配
 #      独立的 luci-i18n-<短名>-zh-cn，否则 apk 会因文件冲突报
 #      "trying to overwrite ... owned by ..." 导致 make image 失败。
 #      B 组短名展开本就不加 i18n 包，无需手工处理。
+#      （argon-config 同理，但它已从默认清单移除——实机验证 dllkids 的
+#        argon 系在官方 OpenWrt 25.12 的 LuCI 上会导致 web UI 无法进入，
+#        详见 build.sh 中被注释的 argon 行。）
 # =============================================================================
 
 # =============================================================================
