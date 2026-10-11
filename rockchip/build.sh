@@ -147,7 +147,7 @@ fi
 # 重要：
 #   - OpenWrt 官方源不含代理类插件与 ImmortalWrt 系应用，
 #     第三方包全部依赖本源；不注入则 make image 会因找不到包而失败。
-#   - imm.config 启用了 CONFIG_SIGNATURE_CHECK=y，
+#   - r2s-seed.config 启用了 CONFIG_SIGNATURE_CHECK=y，
 #     因此 apk 会校验源签名 —— 必须提供公钥，
 #     否则安装时安装会报 "UNTRUSTED signature"。
 #

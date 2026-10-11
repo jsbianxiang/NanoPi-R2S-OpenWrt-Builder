@@ -195,7 +195,7 @@ DLLKIDS_KEY_URL="https://down.dllkids.xyz/openwrt-feed/keys/dllkids-feed.pub.pem
   脚本会自动展开为 `luci-app-<短名>` + `luci-i18n-<短名>-zh-cn`。
   例：`ENABLE_APPS="filemanager sqm ttyd"`。A 组共 **82** 个可用短名（已逐一校验）。
 - **仅第三方源提供的应用**：把短名填进 `THIRD_PARTY_APPS`，
-  只展开 `luci-app-<短名>`、不加 i18n 包（该源无语言包）。B 组共 **46** 个可用短名。
+  只展开 `luci-app-<短名>`、不加 i18n 包（该源无语言包）。B 组共 **47** 个可用短名。
 - **例外**：`argon-config` / `cpufreq` / `diskman` 三个 app 包（第三方源，版本 `27.150.x`）
   **已内置简体中文**，不要给它们手工追加 `luci-i18n-<短名>-zh-cn` ——
   否则 apk 会因文件冲突报 `trying to overwrite ... owned by luci-app-...` 使
@@ -226,7 +226,7 @@ files/etc/uci-defaults/
   99-custom.sh                            # 首次启动初始化脚本（R2S 专用，网口映射硬编码）
 rockchip/
   build.sh                                # 构建脚本 + dllkids 第三方源注入
-  imm.config                              # Image Builder 配置（机型 + 签名校验）
+  r2s-seed.config                         # Image Builder 配置（机型 + 签名校验）
 shell/
   custom-packages.sh                      # 可选软件包开关（第三方插件默认 Clashoo）
 README.md                                 # 本文件

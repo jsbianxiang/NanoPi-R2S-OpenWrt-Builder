@@ -133,13 +133,13 @@ jobs:
           # 官方 openwrt/imagebuilder 容器：
           #   - 工作目录为 /builder（ImmortalWrt 镜像是 /home/build/immortalwrt）
           #   - release 版 tag 内已解包好完整 Image Builder
-          #   - 挂载 imm.config 覆盖 /builder/.config（含机型与签名校验配置）
+          #   - 挂载 r2s-seed.config 覆盖 /builder/.config（含机型与签名校验配置）
           docker run --rm -i \
               --user root \
               -v "${{ github.workspace }}/bin:/builder/bin" \
               -v "${{ github.workspace }}/files:/builder/files" \
               -v "${{ github.workspace }}/custom:/builder/files/etc/config" \
-              -v "${{ github.workspace }}/rockchip/imm.config:/builder/.config" \
+              -v "${{ github.workspace }}/rockchip/r2s-seed.config:/builder/.config" \
               -v "${{ github.workspace }}/shell:/builder/shell" \
               -v "${{ github.workspace }}/rockchip/build.sh:/builder/build.sh" \
               -e PROFILE="$PROFILE" \

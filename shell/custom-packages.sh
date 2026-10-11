@@ -13,7 +13,7 @@
 #      例：ENABLE_APPS="filemanager sqm ttyd"
 #   3. 仅第三方源（dllkids）提供的应用：把短名填进 2.2 的 THIRD_PARTY_APPS，
 #      脚本只展开 luci-app-<短名>、**不加** i18n 包（该源没有语言包）。
-#      可用短名见「三」B 组（共 46 个，已逐一校验）。
+#      可用短名见「三」B 组（共 47 个，已逐一校验）。
 #   4. 少数包不是 luci-app-<短名> 形式（luci-proto-* / luci-mod-* / openclash /
 #      passwall 等），在「二」2.3 里取消对应行注释即可。
 #
@@ -80,7 +80,7 @@ ENABLE_APPS=""
 # 2.2 仅第三方源（dllkids）短名开关：填进 THIRD_PARTY_APPS 即启用
 # -----------------------------------------------------------------------------
 # 自动展开为 luci-app-<短名>（⚠ 不加 i18n 包，该源没有语言包）。
-# 可用短名见「三」B 组（第三方源 46 个）。
+# 可用短名见「三」B 组（第三方源 47 个）。
 # 注意：argon-config / cpufreq / diskman 的 app 包**自带简体中文**，
 #       千万不要再手工追加 luci-i18n-<短名>-zh-cn（详见文件头注意事项 6）。
 THIRD_PARTY_APPS=""
@@ -99,13 +99,15 @@ unset _app
 # -----------------------------------------------------------------------------
 # 网络协议
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-proto-wireguard"
-#CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-proto-minieap luci-i18n-minieap-zh-cn"
+# （校园网认证 802.1X 的 minieap 用 B 组短名 minieap 启用——dllkids 源里是
+#   luci-app-minieap 且中文原生，没有 luci-proto-minieap，也没有 i18n 包）
 # 面板（luci-mod-*）
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-battstatus luci-i18n-battstatus-zh-cn"
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-dashboard luci-i18n-dashboard-zh-cn"
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-dsl luci-i18n-dsl-zh-cn"
-# 代理（⚠ 与 Clashoo 互斥，只能选一个；包本体来自 dllkids 第三方源）
-#CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview xray-core sing-box hysteria luci-i18n-passwall-zh-cn"
+# 代理（⚠ 与 Clashoo 互斥，只能选一个；app 本体在「三」B 组，
+#       用 THIRD_PARTY_APPS="passwall" 启用；下面只补依赖与内核）
+#CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview xray-core sing-box hysteria"
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-openclash luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy bash curl ip-full unzip"
 
 # =============================================================================
@@ -175,7 +177,7 @@ unset _app
 #
 # --- 认证 / 校园网 / 拨号 ---
 #   cd8021x                   sysuh3c                   ua2f                      bitsrunlogin-go           pppoe-relay
-#   pppoe-server
+#   pppoe-server              minieap
 #
 # --- 系统工具 / 服务 ---
 #   sms-tool-js               modemband                 vlmcsd                    xlnetacc

@@ -65,7 +65,7 @@
      （如 `ENABLE_APPS="filemanager sqm ttyd"`），脚本会自动展开为
      `luci-app-<短名>` + `luci-i18n-<短名>-zh-cn`；「三」A 组列出全部 82 个可用短名。
    - 仅第三方源（dllkids）：把短名填进 `THIRD_PARTY_APPS`，只展开 `luci-app-<短名>`
-     （该源没有语言包，不加 i18n）；「三」B 组列出全部 46 个可用短名。
+     （该源没有语言包，不加 i18n）；「三」B 组列出全部 47 个可用短名。
    少数非 `luci-app-*` 形式的包（`luci-proto-*` / `luci-mod-*` / openclash /
    passwall 等）取消 2.3 对应行注释即可。
    > ⚠️ **例外：已内置中文的 app 包。** `argon-config` / `cpufreq` / `diskman`
