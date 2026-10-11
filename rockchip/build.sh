@@ -245,9 +245,14 @@ cp -f keys/dllkids-feed.pub.pem files/etc/apk/keys/dllkids-feed.pub.pem
 # 注意：distfeeds.list 不是 conffile，sysupgrade 升级后会随 apk 包恢复为
 # 官方源（备份文件同样会被清掉），届时需重新替换——本脚本重跑构建即可。
 if [ -f repositories ]; then
-    cp -f repositories files/etc/apk/repositories.d/distfeeds.list.official.bak
-    sed 's#https://downloads.openwrt.org/releases/#https://mirrors.ustc.edu.cn/openwrt/releases/#g' \
-        repositories > files/etc/apk/repositories.d/distfeeds.list
+    # 只取官方行：此时 repositories 已被追加过 dllkids 源（见上方注入逻辑），
+    # 而 dllkids 源已单独写在 customfeeds.list——若不过滤，设备端会重复声明
+    # 同一第三方源，且「官方备份」也不再纯官方。
+    grep -E '^https://downloads\.openwrt\.org/' repositories \
+        > files/etc/apk/repositories.d/distfeeds.list.official.bak
+    sed 's#https://downloads\.openwrt\.org/releases/#https://mirrors.ustc.edu.cn/openwrt/releases/#g' \
+        files/etc/apk/repositories.d/distfeeds.list.official.bak \
+        > files/etc/apk/repositories.d/distfeeds.list
     echo "---- 设备端官方源备份（distfeeds.list.official.bak）----"
     cat files/etc/apk/repositories.d/distfeeds.list.official.bak
     echo "---- 设备端 distfeeds.list（已切换中科大镜像）----"

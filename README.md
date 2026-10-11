@@ -227,7 +227,7 @@ DLLKIDS_KEY_URL="https://down.dllkids.xyz/openwrt-feed/keys/dllkids-feed.pub.pem
   否则 apk 会因文件冲突报 `trying to overwrite ... owned by luci-app-...` 使
   `make image` 失败。
 - 少数不是 `luci-app-<短名>` 形式的包（`luci-proto-*` / `luci-mod-*` /
-  openclash / passwall 等），取消对应行注释即可。
+  openclash）：在 2.3 取消对应行注释即可；passwall 用「三」B 组短名启用。
 
 第三方插件默认启用 Clashoo 一个。
 
@@ -262,8 +262,11 @@ LICENSE                                   # 许可证
 .gitattributes                            # 强制 LF 换行（shell 脚本必需）
 ```
 
-> 说明：`rockchip/build.sh` 在运行时还会生成 `files/etc/config/wan-settings`，
-> 工作流会生成 `custom/custom_router_ip.txt`；这两者随固件发布，但**不属于仓库文件**。
+> 说明：`rockchip/build.sh` 在运行时还会生成 `files/etc/config/wan-settings`、
+> `files/etc/sysctl.d/99-bbr.conf`、`files/etc/apk/repositories.d/` 下的
+> `customfeeds.list` / `distfeeds.list` / `distfeeds.list.official.bak` 与
+> `files/etc/apk/keys/` 下的公钥；工作流会生成 `custom/custom_router_ip.txt`。
+> 以上均随固件发布，但**不属于仓库文件**。
 
 ---
 

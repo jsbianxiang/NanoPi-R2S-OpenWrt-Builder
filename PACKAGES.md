@@ -66,8 +66,8 @@
      `luci-app-<短名>` + `luci-i18n-<短名>-zh-cn`；「三」A 组列出全部 82 个可用短名。
    - 仅第三方源（dllkids）：把短名填进 `THIRD_PARTY_APPS`，只展开 `luci-app-<短名>`
      （该源没有语言包，不加 i18n）；「三」B 组列出全部 47 个可用短名。
-   少数非 `luci-app-*` 形式的包（`luci-proto-*` / `luci-mod-*` / openclash /
-   passwall 等）取消 2.3 对应行注释即可。
+   少数非 `luci-app-*` 形式的包（`luci-proto-*` / `luci-mod-*` / openclash）
+   取消 `custom-packages.sh` 2.3 对应行注释即可；passwall 用 B 组短名启用。
    > ⚠️ **例外：已内置中文的 app 包。** `argon-config` / `cpufreq` / `diskman`
    > 这三个 app 包（仅第三方源提供，版本 `27.150.x`）**自带简体中文**
    > （内含 `usr/lib/lua/luci/i18n/*.zh-cn.lmo` 与 `etc/uci-defaults/luci-i18n-*`）。

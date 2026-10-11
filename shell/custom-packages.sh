@@ -27,8 +27,8 @@
 #      的配置互相冲突，只能启用其中一个。
 #   3. 本分支不集成 store / istore，故不提供依赖 istore 的插件选项。
 #   4. 硬路由 / 小闪存设备请酌情启用；包过多会导致固件过大或构建失败。
-#   5. 「三」的短名已对 OpenWrt 25.12.5 官方源（aarch64_generic，
-#      base/luci/packages/routing/telephony 共 9839 个包名）与 dllkids 第三方源
+#   5. 「三」的短名已对 OpenWrt 25.12.5 官方源（aarch64_generic 的
+#      base/luci/packages/routing/telephony 五个 feed）与 dllkids 第三方源
 #      逐一校验。两处都不存在的 oled / 3cat / 3ginfo-lite / appfilter 已剔除，
 #      避免「取消注释即构建失败」。
 #   6. 【已内置中文的 app 包】argon-config / cpufreq / diskman 这三个 app 包
