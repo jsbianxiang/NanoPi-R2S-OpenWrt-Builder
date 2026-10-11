@@ -364,11 +364,32 @@ uci_do set dhcp.wan.ignore='1'
 # ---------------------------------------------------------------------------
 # 7. 防火墙
 # 不修改 zone 的 input/forward/output 策略；WAN 入站继续使用官方默认拒绝策略。
-# 注：synflood_protect 显式置 1。官方默认配置写的是 syn_flood，而 firewall4 实际
-# 读取的是 synflood_protect（fw4.uc 的 defaults 表，无内置默认值），并有回退：
-#   if (defs.synflood_protect === null) defs.synflood_protect = defs.syn_flood;
-# 即官方默认本就开启 SYN flood 防护（synflood_rate 默认 25/second、burst 50）。
-# 这里用现代选项名显式写出，防止上游改名后失效。
+#
+# 官方 conffile（firewall4 仓库 root/etc/config/firewall）写的是**遗留选项名**
+# `option syn_flood 1`；而 firewall4 实际读取的是 `synflood_protect`，并有回退
+# （fw4.uc parse_defaults，25.12 所用 commit b6e5157）：
+#   syn_flood:          [ "bool" ],
+#   synflood_protect:   [ "bool" ],
+#   synflood_rate:      [ "limit", "25/second" ],
+#   synflood_burst:     [ "int", "50" ],
+#   ...
+#   if (defs.synflood_protect === null)
+#       defs.synflood_protect = defs.syn_flood;
+#   delete defs.syn_flood;              // ← fw4 自己就把这个别名删掉了
+# 规则生成处：templates/ruleset.uc 用 fw4.default_option("synflood_protect")
+# 决定是否产出 syn_flood 链与限速跳转规则（即官方默认本就开启，25/second + burst 50）。
+#
+# 因此做法是「写入现代选项名 + 删除遗留别名」，这也正是 LuCI 自己的行为
+# （luci-app-firewall 的 view/firewall/zones.js，openwrt-25.12）：
+#   o = s.option(form.Flag, 'synflood_protect', _('Enable SYN-flood protection'));
+#   o.cfgvalue = ... uci.get(...,'synflood_protect') ?? uci.get(...,'syn_flood');
+#   o.write    = ... uci.unset(...,'syn_flood'); uci.set(...,'synflood_protect', value);
+# ⇒ LuCI 读的是 synflood_protect，所以我们置 1 后复选框正确显示为「已勾选」；
+#   删除 syn_flood 只是让 uci show firewall 输出唯一化，不会削弱防护
+#   （synflood_protect 已为 1，回退分支永不触发）。
+#   注意 syn_flood **不是**死选项（fw4 与 LuCI 都识别它），删除属「迁移」而非「清理垃圾」。
+# 顺序：先置新选项、再删旧别名——即使删除步骤异常，回退分支仍能兜住防护。
+#
 # 流量卸载（flow_offloading / flow_offloading_hw）官方默认即关闭（fw4.uc 内置 "0"），
 # 不再触碰——默认固件没有 TPROXY 透明代理插件，无冲突场景；日后若启用 passwall 等
 # TPROXY 插件，也请勿在 LuCI 开启流量卸载（fast path 会绕过 netfilter 钩子）。
@@ -376,6 +397,7 @@ uci_do set dhcp.wan.ignore='1'
 # 写入只会在配置里留下无人识别的死选项。
 # ---------------------------------------------------------------------------
 uci_do set firewall.@defaults[0].synflood_protect='1'
+uci_delete_optional 'firewall.@defaults[0].syn_flood'
 
 # ---------------------------------------------------------------------------
 # 8. 中国大陆优化：时区与 NTP

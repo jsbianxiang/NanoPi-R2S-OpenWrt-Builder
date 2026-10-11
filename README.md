@@ -174,6 +174,7 @@ GMAC，由内核直接支持。
 | 网络 | `packet_steering='1'` | 数据包引导显式开启（与「未设」等价，写出来便于 `uci show` 比对） |
 | DHCP | `dhcp.wan.ignore='1'` | 显式禁用 WAN 侧 DHCP 服务（与官方默认一致，显式写出以防上游变化） |
 | 防火墙 | `synflood_protect='1'` | 显式开启 SYN-flood 防护（官方 25.12 默认已是 1，写出以防上游变化） |
+| 防火墙 | 删除遗留别名 `syn_flood` | 官方 conffile 写的是旧名 `syn_flood`；fw4 与 LuCI 都把 `syn_flood` 迁移到 `synflood_protect`，本项目同样只保留现代选项名 |
 | 大陆优化 | 时区 `Asia/Shanghai`（CST-8） | 官方默认 UTC，改为北京时间 |
 | 大陆优化 | NTP 改用国内服务器 | 阿里 `ntp.aliyun.com` / `ntp1.aliyun.com`、腾讯 `time1.cloud.tencent.com`、`cn.pool.ntp.org`，替换官方 openwrt 池 |
 
@@ -212,6 +213,11 @@ GMAC，由内核直接支持。
 > 默认 0，与官方 conffile 完全相同，属空操作）、
 > wan 段的 `leasetime` / `start` / `limit`（`ignore='1'` 下 WAN 侧本就没有 DHCP 服务）。
 > DHCPv6 / RA / dnsmasq 行为完全沿用官方默认。
+
+> **另需与上表区分**：`firewall.@defaults[0].syn_flood` 的删除**不属于**「无效/有害项」。
+> `syn_flood` 是 firewall4 与 LuCI 都识别、且**都会主动迁移**的遗留别名
+> （见下文「WAN 入站防火墙」一节的选项名说明），删它是为了让配置语义唯一，
+> 而不是因为它无人读取。
 
 > **有意不写入的**：`ttyd` / `dropbear` 的监听范围。两个服务保持上游默认、只监听局域网。
 > 详见「WAN 入站防火墙」一节。
@@ -363,8 +369,9 @@ LuCI 的「软件包」页安装/卸载软件同样经由 uci，所以那里也�
 本项目采用 **OpenWrt 官方默认防火墙策略**：
 
 - 固件**不提供** `/etc/config/firewall`（完全继承 `firewall4` 包的默认配置）；
-- `99-custom.sh` **不修改任何区域（zone）与通信规则的策略**，只做一项全局设置：
-  `synflood_protect='1'`（官方默认已是 1，显式写出以防上游变化）。
+- `99-custom.sh` **不修改任何区域（zone）与通信规则的策略**，只做两项全局设置：
+  `synflood_protect='1'`（官方默认已是 1，显式写出以防上游变化），并删除官方
+  conffile 里的遗留别名 `syn_flood`（见下节说明，属「迁移」而非「清理垃圾」）。
   流量卸载（`flow_offloading` / `flow_offloading_hw`）官方默认即关闭，不做改动；
   官方 firewall4 没有 fullcone 选项，此前版本的 `fullcone='0'` 已移除。
   注意：日后若启用 passwall 等 TPROXY 透明代理插件，请**不要**在 LuCI 里开启
@@ -400,13 +407,51 @@ config zone
 	option mtu_fix		1
 ```
 
-> **关于 SYN flood 选项名**：默认配置文件里写的是 `syn_flood`，但 firewall4 实际
-> 读取的是 `synflood_protect`（`root/usr/share/ucode/fw4.uc` 中 `defaults` 表：
-> `synflood_protect: [ "bool" ]`，无内置默认值），并有一段向后兼容回退：
-> `if (defs.synflood_protect === null) defs.synflood_protect = defs.syn_flood;`
-> ——因此官方默认**已开启** SYN flood 防护（`synflood_rate` 默认 `25/second`、
-> `synflood_burst` 默认 `50`）。本项目显式写 `synflood_protect='1'`，与官方默认一致，
-> 用现代选项名固定下来以防上游改名。
+> **关于 SYN flood 选项名（`syn_flood` → `synflood_protect`）**：
+> 默认配置文件里写的是**遗留名** `syn_flood`，而 firewall4 实际读取的是
+> `synflood_protect`。`root/usr/share/ucode/fw4.uc` 的 `defaults` 表里两个名字
+> **都声明了**，随后做一次归一化并**主动删掉旧名**：
+>
+> ```ucode
+> syn_flood:          [ "bool" ],
+> synflood_protect:   [ "bool" ],
+> synflood_rate:      [ "limit", "25/second" ],
+> synflood_burst:     [ "int", "50" ],
+> ...
+> if (defs.synflood_protect === null)
+>     defs.synflood_protect = defs.syn_flood;
+> delete defs.syn_flood;
+> ```
+>
+> 规则生成在 `templates/ruleset.uc`，用 `fw4.default_option("synflood_protect")`
+> 决定是否产出 `syn_flood` 链与限速跳转规则 —— 因此官方默认**已开启**防护
+> （`synflood_rate` 默认 `25/second`、`synflood_burst` 默认 `50`）。
+>
+> LuCI 也是同一套逻辑（`luci-app-firewall` 的 `view/firewall/zones.js`，
+> 分支 `openwrt-25.12`）：
+>
+> ```js
+> o = s.option(form.Flag, 'synflood_protect', _('Enable SYN-flood protection'));
+> o.cfgvalue = function(section_id) {                 // 读：优先新名，回退旧名
+>     const val = uci.get('firewall', section_id, 'synflood_protect');
+>     return (val != null) ? val : uci.get('firewall', section_id, 'syn_flood');
+> };
+> o.write = function(section_id, value) {             // 写：删旧名、写新名
+>     uci.unset('firewall', section_id, 'syn_flood');
+>     uci.set('firewall', section_id, 'synflood_protect', value);
+> };
+> ```
+>
+> 所以本项目做的事和 LuCI 一致：**写 `synflood_protect='1'` + 删 `syn_flood`**。
+> 两个后果都是期望的：
+>
+> 1. LuCI「常规设置 → 启用 SYN-flood 防护」复选框读的是 `synflood_protect`，
+>    因此正确显示为**已勾选**；
+> 2. `uci show firewall` 里不再同时出现新旧两个名字，语义唯一。
+>
+> ⚠️ `syn_flood` **不是死选项**（fw4 与 LuCI 都识别它），删它是「迁移」而不是
+> 「清理垃圾」——若将来有人把 `synflood_protect` 删掉，回退链也随之消失，防护会关。
+> `99-custom.sh` 里因此**先置新选项、再删旧别名**，即使删除步骤异常，回退分支仍能兜住。
 
 即 **WAN 入站默认「拒绝」**，不允许从 WAN 侧访问路由器后台。
 
