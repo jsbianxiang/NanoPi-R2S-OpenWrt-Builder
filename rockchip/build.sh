@@ -34,6 +34,9 @@ echo "cat wan-settings"
 cat "$BUILDER_DIR/files/etc/config/wan-settings"
 
 # ---- 中国大陆优化：BBR 拥塞控制 sysctl ----
+# ⚠ 本文件**必须保留**：安装 kmod-tcp-bbr 只是提供 tcp_bbr 内核模块（自动加载），
+#   **不会自动启用 BBR** —— 已核对官方 25.12 rockchip 内核配置（kernel 6.12）：
+#   CONFIG_DEFAULT_TCP_CONG="cubic"，即默认算法仍是 cubic，必须靠 sysctl 显式切换。
 # 官方 /etc/init.d/sysctl 依次加载 /etc/sysctl.d/*.conf 与 /etc/sysctl.conf；
 # 该目录虽不参与 sysupgrade 备份，但本文件由固件自带，升级后依然存在。
 # 内核 4.13+ 在无 fq 队列时 BBR 使用 TCP 内部 pacing 兜底，可直接启用；
@@ -69,8 +72,11 @@ PACKAGES=""
 #   设备上 /etc/init.d/uhttpd 都不存在，web UI 完全无法访问。
 # `luci` 集合包（官方 luci feed）会带齐：uhttpd + luci-base +
 #   luci-mod-admin-full + luci-theme-bootstrap + rpcd 组件。
-# `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上（见
-#   firmware-selector 官方页 Installed Packages），保持与官方基线一致。
+# `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上。
+# ✔ 已核对官方 25.12.5 rockchip/armv8 manifest（openwrt-25.12.5-rockchip-armv8.manifest，
+#   共 128 包）：官方固件 = IB 默认包 + `luci` + `luci-app-attendedsysupgrade`，
+#   其余 luci-light/luci-ssl/uhttpd/rpcd-mod-* 均为这两个元包的自动依赖。
+#   即下方前两行预置的就是官方 Installed Packages 基线，其后都是本项目的增量。
 PACKAGES="$PACKAGES luci"
 PACKAGES="$PACKAGES luci-app-attendedsysupgrade"
 PACKAGES="$PACKAGES curl"
