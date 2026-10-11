@@ -261,6 +261,17 @@ cat files/etc/apk/repositories.d/customfeeds.list
 echo "---- 随固件发布的公钥 ----"
 ls -l files/etc/apk/keys/
 
+# =========================================================
+# 去重：本文件默认列表与 shell/custom-packages.sh 的启用项
+# 可能出现同名包（例如手动在两处都启用了同一插件）。
+# 官方 Image Builder 的 FormatPackages 宏不去重，会把重复名原样传给
+# `apk add`——apk 对重复包名幂等（solver 合并，不会报错），但这里仍
+# 去重一次，让 make image 的安装清单干净、日志可读，不依赖 apk 的宽容行为。
+# 注意：`$PACKAGES` 不加引号是有意的（按空白分词；包名不含空格）。
+# =========================================================
+PACKAGES=$(printf '%s\n' $PACKAGES | awk '!seen[$0]++' | paste -sd ' ' -)
+echo "去重后待安装包数: $(echo $PACKAGES | wc -w)"
+
 make image PROFILE=$PROFILE PACKAGES="$PACKAGES" FILES="$BUILDER_DIR/files" ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE
 
 if [ $? -ne 0 ]; then
