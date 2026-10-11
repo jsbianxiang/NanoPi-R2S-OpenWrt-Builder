@@ -1,0 +1,367 @@
+#!/bin/sh
+# ============================================================================
+# 99-custom.sh — OpenWrt 首次启动初始化
+# 目标：FriendlyARM NanoPi R2S / RK3328
+# 安装位置：/etc/uci-defaults/99-custom.sh
+#
+# 固定网络映射（与 R2S 官方 board.d 定义一致）：
+#   eth0：板载 GMAC -> WAN
+#   eth1：USB RTL8153 -> LAN；br-lan 及其端口由 config_generate 创建
+#
+# 职责：WAN/WAN6、LAN 管理地址、网络选项、DHCP/DNS、防火墙选项。
+# 不放开 WAN 入站，不改写固件品牌，不注入第三方插件补丁。
+#
+# 执行约定：这是 uci-defaults 脚本，不应作为普通运行脚本单独执行。
+# 标准启动流程会在全部默认脚本执行后统一 uci commit；本脚本不提前提交，
+# 避免中途提交其他初始化脚本的暂存改动。
+# ============================================================================
+
+# 固定 IFS，并关闭路径名展开，避免配置值中的 *、?、[] 被展开成文件名。
+IFS=' 	
+'
+set -f
+LC_ALL=C
+export LC_ALL
+
+LOGFILE='/etc/config/uci-defaults-log.txt'
+CR=$(printf '\r')
+
+log() {
+    printf '%s\n' "$*" >> "$LOGFILE" 2>/dev/null || :
+}
+
+fail() {
+    log "ERROR: $*"
+    printf '99-custom.sh: ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+uci_do() {
+    uci "$@" || fail "UCI command failed: uci $*"
+}
+
+# 删除可选项：选项不存在时属于正常情况，不应中断初始化。
+uci_delete_optional() {
+    uci -q delete "$1" >/dev/null 2>&1 || :
+}
+
+trim() {
+    TRIMMED=$(printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+}
+
+# 校验标准点分十进制 IPv4；拒绝前导零，避免不同组件对八进制写法解释不一。
+is_ipv4() {
+    IPV4_CANDIDATE=$1
+    case "$IPV4_CANDIDATE" in
+        ''|*[!0-9.]*|.*|*.|*..*) return 1 ;;
+    esac
+
+    _saved_ifs=$IFS
+    IFS='.'
+    set -- $IPV4_CANDIDATE
+    IFS=$_saved_ifs
+    [ "$#" -eq 4 ] || return 1
+
+    for _octet do
+        case "$_octet" in
+            0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
+            *) return 1 ;;
+        esac
+    done
+    return 0
+}
+
+# 检查 IPv4/CIDR，并写入 NORMALIZED_CIDR。未带前缀时使用调用方指定的默认值。
+normalize_ipv4_cidr() {
+    _normal_value=$1
+    _normal_default_prefix=$2
+
+    case "$_normal_value" in
+        */*)
+            _normal_ip=${_normal_value%%/*}
+            _normal_prefix=${_normal_value#*/}
+            case "$_normal_prefix" in */*) return 1 ;; esac
+            ;;
+        *)
+            _normal_ip=$_normal_value
+            _normal_prefix=$_normal_default_prefix
+            ;;
+    esac
+
+    is_ipv4 "$_normal_ip" || return 1
+    case "$_normal_prefix" in
+        [1-9]|1[0-9]|2[0-9]|3[0-2]) ;;
+        *) return 1 ;;
+    esac
+
+    NORMALIZED_CIDR="$_normal_ip/$_normal_prefix"
+    return 0
+}
+
+# DNS 支持 IPv4 和普通 IPv6 字面地址（不含 zone ID 或嵌入式 IPv4 尾段）。
+is_ipv6_dns_literal() {
+    printf '%s\n' "$1" | awk '
+        function count_groups(s, a, n, i) {
+            if (s == "") return 0
+            n = split(s, a, ":")
+            for (i = 1; i <= n; i++) {
+                if (length(a[i]) < 1 || length(a[i]) > 4 || a[i] !~ /^[[:xdigit:]]+$/)
+                    return -1
+            }
+            return n
+        }
+        {
+            if ($0 == "" || $0 !~ /^[[:xdigit:]:]+$/) exit 1
+            pos = index($0, "::")
+            if (pos) {
+                left = substr($0, 1, pos - 1)
+                right = substr($0, pos + 2)
+                if (index(right, "::")) exit 1
+                nl = count_groups(left, la)
+                nr = count_groups(right, ra)
+                if (nl < 0 || nr < 0 || nl + nr >= 8) exit 1
+            } else {
+                if ($0 ~ /^:/ || $0 ~ /:$/) exit 1
+                n = count_groups($0, a)
+                if (n != 8) exit 1
+            }
+        }
+    '
+}
+
+is_dns_address() {
+    case "$1" in
+        *:*) is_ipv6_dns_literal "$1" ;;
+        *)   is_ipv4 "$1" ;;
+    esac
+}
+
+require_uci_section() {
+    uci -q get "$1" >/dev/null 2>&1 || fail "required UCI section missing: $1"
+}
+
+log "Starting 99-custom.sh at $(date)"
+
+# ---------------------------------------------------------------------------
+# 1. 读取构建阶段生成的 WAN 参数
+# 文件格式为 key=value；只解析数据，不 source，避免把配置内容当 Shell 代码执行。
+# ---------------------------------------------------------------------------
+SETTINGS_FILE='/etc/config/wan-settings'
+wan_proto=''
+wan_ip=''
+wan_gateway=''
+wan_dns=''
+
+if [ -f "$SETTINGS_FILE" ]; then
+    [ -r "$SETTINGS_FILE" ] || fail "cannot read $SETTINGS_FILE"
+
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        _line=${_line%"$CR"}
+        trim "$_line"
+        _line=$TRIMMED
+        case "$_line" in
+            ''|'#'*) continue ;;
+            *=*)
+                _key=${_line%%=*}
+                _value=${_line#*=}
+                trim "$_key"; _key=$TRIMMED
+                trim "$_value"; _value=$TRIMMED
+                ;;
+            *)
+                log "WARN: ignoring malformed WAN settings line"
+                continue
+                ;;
+        esac
+
+        case "$_key" in
+            wan_proto)   wan_proto=$_value ;;
+            wan_ip)      wan_ip=$_value ;;
+            wan_gateway) wan_gateway=$_value ;;
+            wan_dns)     wan_dns=$_value ;;
+            *)           : ;; # 忽略其他键，允许将来扩展配置文件
+        esac
+    done < "$SETTINGS_FILE"
+else
+    log 'WAN settings file not found; using built-in defaults'
+fi
+
+wan_proto=${wan_proto:-dhcp}
+wan_ip=${wan_ip:-192.168.1.2}
+wan_gateway=${wan_gateway:-192.168.1.1}
+wan_dns=${wan_dns:-$wan_gateway}
+
+case "$wan_proto" in
+    dhcp|static) ;;
+    *) fail 'wan_proto must be dhcp or static' ;;
+esac
+
+# 先读取并验证全部地址，再执行任何 UCI 修改，避免坏输入先清除旧 LAN 地址。
+if [ "$wan_proto" = 'static' ]; then
+    normalize_ipv4_cidr "$wan_ip" 24 || fail 'invalid WAN IPv4 address/CIDR in wan-settings'
+    WAN_IP_CIDR=$NORMALIZED_CIDR
+    is_ipv4 "$wan_gateway" || fail 'invalid WAN IPv4 gateway in wan-settings'
+
+    _dns_count=0
+    for _dns in $wan_dns; do
+        is_dns_address "$_dns" || fail 'invalid DNS address in wan-settings'
+        _dns_count=$((_dns_count + 1))
+    done
+    [ "$_dns_count" -gt 0 ] || fail 'no DNS servers configured for static WAN'
+fi
+
+# ---------------------------------------------------------------------------
+# 2. LAN 管理地址
+# custom_router_ip.txt：读取首个非空行；支持空白、CRLF 和带/前缀的 CIDR。
+# ---------------------------------------------------------------------------
+CUSTOM_IP='192.168.2.1'
+IP_VALUE_FILE='/etc/config/custom_router_ip.txt'
+
+if [ -f "$IP_VALUE_FILE" ]; then
+    [ -r "$IP_VALUE_FILE" ] || fail "cannot read $IP_VALUE_FILE"
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        _line=${_line%"$CR"}
+        trim "$_line"
+        _line=$TRIMMED
+        [ -n "$_line" ] || continue
+        CUSTOM_IP=$_line
+        break
+    done < "$IP_VALUE_FILE"
+fi
+
+normalize_ipv4_cidr "$CUSTOM_IP" 24 || fail 'invalid LAN IPv4 address/CIDR in custom_router_ip.txt'
+LAN_IP_CIDR=$NORMALIZED_CIDR
+
+if [ "$wan_proto" = 'static' ]; then
+    log "WAN mode: static; ip=$WAN_IP_CIDR gateway=$wan_gateway dns=$wan_dns"
+else
+    log 'WAN mode: DHCP'
+fi
+log "LAN management address: $LAN_IP_CIDR"
+
+# ---------------------------------------------------------------------------
+# 3. 写入前置条件检查
+# 引用带 @ 和 [n] 的 UCI 路径时一律加引号，避免 Shell 路径名展开。
+# ---------------------------------------------------------------------------
+command -v uci >/dev/null 2>&1 || fail 'uci command not found'
+require_uci_section 'network.lan'
+require_uci_section 'dhcp.lan'
+require_uci_section 'dhcp.wan'
+require_uci_section 'dhcp.@dnsmasq[0]'
+require_uci_section 'dhcp.odhcpd'
+require_uci_section 'firewall.@defaults[0]'
+
+# ---------------------------------------------------------------------------
+# 4. WAN / WAN6
+# R2S 固定由 eth0 接 WAN。静态 WAN 使用 CIDR 列表记法；DHCP 模式清理残留静态项。
+# ---------------------------------------------------------------------------
+uci_do set network.wan=interface
+uci_do set network.wan.device='eth0'
+
+case "$wan_proto" in
+    static)
+        uci_do set network.wan.proto='static'
+        uci_delete_optional 'network.wan.netmask'
+        uci_delete_optional 'network.wan.ipaddr'
+        uci_do add_list "network.wan.ipaddr=$WAN_IP_CIDR"
+        uci_do set "network.wan.gateway=$wan_gateway"
+
+        uci_delete_optional 'network.wan.dns'
+        for _dns in $wan_dns; do
+            uci_do add_list "network.wan.dns=$_dns"
+        done
+        ;;
+    dhcp)
+        uci_do set network.wan.proto='dhcp'
+        for _opt in ipaddr netmask gateway dns; do
+            uci_delete_optional "network.wan.$_opt"
+        done
+        uci_do set network.wan.sendclientid='auto'
+        ;;
+esac
+
+uci_do set network.wan6=interface
+uci_do set network.wan6.device='eth0'
+uci_do set network.wan6.proto='dhcpv6'
+uci_do set network.wan6.reqaddress='try'
+uci_do set network.wan6.reqprefix='auto'
+uci_do set network.wan6.norelease='1'
+uci_do set network.wan6.sendclientid='auto'
+
+# ---------------------------------------------------------------------------
+# 5. LAN 地址与网络全局选项
+# 不重建 br-lan，也不改动官方生成的桥设备、端口或 MAC 地址。
+# ---------------------------------------------------------------------------
+uci_do set network.lan.proto='static'
+uci_delete_optional 'network.lan.netmask'
+uci_delete_optional 'network.lan.ipaddr'
+uci_do add_list "network.lan.ipaddr=$LAN_IP_CIDR"
+
+# 按当前规划配置 LAN IPv6：关闭该接口的前缀继续委派，申请 /64，接口 ID 使用 EUI-64。
+uci_do set network.lan.delegate='0'
+uci_do set network.lan.ip6assign='64'
+uci_do set network.lan.ip6ifaceid='eui64'
+
+if ! uci -q get network.globals >/dev/null 2>&1; then
+    uci_do set network.globals=globals
+fi
+# 删除自动生成的 ULA 前缀，避免 LAN 同时使用 ULA 与上游分配的 IPv6 前缀。
+uci_delete_optional 'network.globals.ula_prefix'
+uci_do set network.globals.packet_steering='1'
+
+# 保留旧设备的 uci show 形态；当前未启用全局 multipath，接口值不启用多路径。
+# 'off' 是旧配置记法；如项目决定统一现代 LuCI 形态，可另行评估改为空字符串。
+uci_do set 'network.lan.multipath=off'
+uci_do set 'network.wan.multipath=off'
+uci_do set 'network.wan6.multipath=off'
+
+log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wan.device) wan6=$(uci -q get network.wan6.device)"
+
+# ---------------------------------------------------------------------------
+# 6. DHCP / DNS（保留默认服务行为；删除等价默认值）
+# ---------------------------------------------------------------------------
+uci_delete_optional 'dhcp.lan.ra_slaac'
+uci_delete_optional 'dhcp.lan.dhcpv6'
+uci_do set dhcp.lan.ra_preference='medium'
+
+# 明确禁用 WAN 侧 DHCP 服务，防止保留配置中 ignore 意外为 0。
+uci_do set dhcp.wan.ignore='1'
+# 以下三项只保留既有配置呈现；ignore=1 时不启用 WAN 侧 DHCP 服务。
+uci_do set dhcp.wan.leasetime='12h'
+uci_do set dhcp.wan.start='100'
+uci_do set dhcp.wan.limit='150'
+
+uci_delete_optional 'dhcp.@dnsmasq[0].nonwildcard'
+uci_delete_optional 'dhcp.@dnsmasq[0].boguspriv'
+uci_delete_optional 'dhcp.@dnsmasq[0].filterwin2k'
+uci_delete_optional 'dhcp.@dnsmasq[0].filter_aaaa'
+uci_delete_optional 'dhcp.@dnsmasq[0].filter_a'
+uci_delete_optional 'dhcp.odhcpd.maindhcp'
+
+# 部分衍生发行版（如 ImmortalWrt）的 dns_redirect 会重定向过路 UDP/53，
+# 与接管 DNS 的代理插件冲突；官方 OpenWrt 无此选项，此删除为空操作。
+uci_delete_optional 'dhcp.@dnsmasq[0].dns_redirect'
+
+# ---------------------------------------------------------------------------
+# 7. 防火墙
+# 不修改 zone 的 input/forward/output 策略；WAN 入站继续使用官方默认拒绝策略。
+# 注：下面按注释中的“取消勾选”处理，显式置 0；值 1 才表示启用/勾选。
+# 关闭 SYN-flood 防御会降低对 SYN 洪泛的防护能力，只有明确需要时才保留此设置。
+# FullCone NAT 全局开关关闭，避免启用该 NAT 模式。
+# 流量卸载设为“无”：删除软件/硬件卸载选项。
+# ---------------------------------------------------------------------------
+uci_do set firewall.@defaults[0].synflood_protect='1'
+uci_do set firewall.@defaults[0].fullcone='0'
+uci_delete_optional 'firewall.@defaults[0].flow_offloading'
+uci_delete_optional 'firewall.@defaults[0].flow_offloading_hw'
+
+# ---------------------------------------------------------------------------
+# 8. 可选设置（默认不执行）
+# 如需默认使用 Bootstrap，取消下一行注释；无需手动 uci commit。
+# uci_do set luci.main.mediaurlbase='/luci-static/bootstrap'
+#
+# ttyd / dropbear 保持包默认的 LAN 监听限制，不在本脚本中清空 interface 限制。
+# 不包含设备专属静态 DHCP 租约、NTP 域名重写、Docker 规则或第三方插件补丁。
+# ---------------------------------------------------------------------------
+
+log '99-custom.sh completed; UCI changes left staged for the uci-defaults runner'
+exit 0
