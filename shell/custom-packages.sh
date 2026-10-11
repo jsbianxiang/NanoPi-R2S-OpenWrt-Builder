@@ -50,6 +50,8 @@
 #
 # ⚠ 该源的第三方 LuCI 应用**没有**独立中文语言包（中文界面为包内原生），
 #   所以不要给它们加 luci-i18n-xxx-zh-cn，否则 make image 会因找不到包而失败。
+#   （唯一例外：Clashoo——源里确有 luci-i18n-clashoo-zh-cn，已在「一」默认启用，
+#     CI 实测可正常安装；除此之外一律不要加 i18n 包。）
 # =============================================================================
 # 【当前已启用】Clashoo —— ⚠ 与 nikki 配置冲突，不可同时启用
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
@@ -58,7 +60,8 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-
 # 1.2 其他第三方插件（可选；⚠⚠ 代理类互斥，与 Clashoo 只能二选一）
 # -----------------------------------------------------------------------------
 # 下面每行的包都已逐一校验存在于 dllkids 第三方源，取消注释即启用。
-# 第三方应用是中文原生，没有独立语言包，故都不带 luci-i18n-*-zh-cn。
+# 第三方应用是中文原生，没有独立语言包，故都不带 luci-i18n-*-zh-cn
+# （Clashoo 是唯一例外，见「一」）。
 #
 # ⚠⚠⚠ 启用下面任何一行之前，必须先把上面已启用的 Clashoo 行注释掉！
 #   两套代理插件会同时接管防火墙规则与 DNS：轻则规则打架、LuCI 配置错乱、

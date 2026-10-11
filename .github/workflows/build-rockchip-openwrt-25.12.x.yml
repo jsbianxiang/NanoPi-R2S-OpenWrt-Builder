@@ -83,7 +83,9 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    # ubuntu-22.04 已于 2026-09 进入 GitHub 退役流程（deprecated），
+    # 用 ubuntu-latest（当前为 24.04）避免 brownout 期构建随机失败。
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code

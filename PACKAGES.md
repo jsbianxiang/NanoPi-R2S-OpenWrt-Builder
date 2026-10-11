@@ -48,6 +48,8 @@
 >
 > ⚠️ 该源的第三方 LuCI 应用**没有**独立中文语言包（中文界面为包内原生），
 > 启用它们时**不要**加 `luci-i18n-xxx-zh-cn`，否则 `make image` 会因找不到包而失败。
+> **唯一例外是 Clashoo**：源里确有 `luci-i18n-clashoo-zh-cn`，本项目已默认启用
+> （CI 实测可正常安装）；除此之外的任何第三方应用都不要加 i18n 包。
 >
 > ⚠️ Clashoo 与 **nikki** 配置冲突，不要同时集成。
 > ⚠️ Clashoo 依赖的 kmod（`kmod-tun`、`kmod-nft-tproxy`、`kmod-nft-socket`、
