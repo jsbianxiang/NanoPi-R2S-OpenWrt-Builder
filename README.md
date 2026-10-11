@@ -112,10 +112,11 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
   - **时区**：`Asia/Shanghai`（CST-8，官方默认 UTC）；
   - **NTP**：改为国内源（阿里 `ntp.aliyun.com` / `ntp1.aliyun.com`、
     腾讯 `time1.cloud.tencent.com`、`cn.pool.ntp.org`），替换官方 openwrt 池；
-  - **BBR TCP 拥塞控制**：预装 `kmod-tcp-bbr` 并写入
-    `/etc/sysctl.d/99-bbr.conf`（`net.ipv4.tcp_congestion_control=bbr`），
-    上游拥塞算法由默认 cubic 改为 BBR，可缓解跨境/跨运营商链路吞吐抖动；
-    验证方式：`sysctl net.ipv4.tcp_congestion_control`。
+  - **TCP 拥塞控制：维持官方默认 cubic**（不预装 `kmod-tcp-bbr`，也不写 sysctl）。
+    说明：安装 `kmod-tcp-bbr` 只提供模块，**不会自动启用**（官方内核
+    `CONFIG_DEFAULT_TCP_CONG="cubic"`），需额外 sysctl 才生效；本项目保持官方默认。
+    如需 BBR，设备端手动执行：
+    `apk add kmod-tcp-bbr && echo 'net.ipv4.tcp_congestion_control = bbr' > /etc/sysctl.d/99-bbr.conf && /etc/init.d/sysctl restart`。
   - **设备端软件源：先备份官方，再切换中科大镜像**：`build.sh` 以 Image
     Builder 的官方 `repositories`（与设备端 distfeeds 同源，含 kmods 内核
     哈希路径）为蓝本，把官方原文备份到
@@ -169,8 +170,8 @@ GMAC，由内核直接支持。
 | 大陆优化 | 时区 `Asia/Shanghai`（CST-8） | 官方默认 UTC，改为北京时间 |
 | 大陆优化 | NTP 改用国内服务器 | 阿里 `ntp.aliyun.com` / `ntp1.aliyun.com`、腾讯 `time1.cloud.tencent.com`、`cn.pool.ntp.org`，替换官方 openwrt 池 |
 
-> **BBR 拥塞控制**不在首启脚本里：`kmod-tcp-bbr` 与 `/etc/sysctl.d/99-bbr.conf`
-> 由 `rockchip/build.sh` 在**构建期**写入固件（sysctl 初始化顺序在内核模块加载之后，无需首启干预）。
+> **TCP 拥塞控制**不在首启脚本里：本项目维持官方默认 cubic，不预装
+> `kmod-tcp-bbr`；设备端手动启用 BBR 的方法见上文「中国大陆优化」一节。
 
 > **已移除的无效项**（此前版本存在，经与官方 v25.12.5 源码核对后清理）：
 > `multipath='off'`（官方 netifd 无此选项，MPTCP 属 ImmortalWrt 补丁）、
@@ -269,7 +270,7 @@ LICENSE                                   # 许可证
 ```
 
 > 说明：`rockchip/build.sh` 在运行时还会生成 `files/etc/config/wan-settings`、
-> `files/etc/sysctl.d/99-bbr.conf`、`files/etc/apk/repositories.d/` 下的
+> `files/etc/apk/repositories.d/` 下的
 > `customfeeds.list` / `distfeeds.list` / `distfeeds.list.official.bak` 与
 > `files/etc/apk/keys/` 下的公钥；工作流会生成 `custom/custom_router_ip.txt`。
 > 以上均随固件发布，但**不属于仓库文件**。

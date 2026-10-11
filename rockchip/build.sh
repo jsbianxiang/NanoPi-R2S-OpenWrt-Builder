@@ -33,22 +33,15 @@ EOF
 echo "cat wan-settings"
 cat "$BUILDER_DIR/files/etc/config/wan-settings"
 
-# ---- 中国大陆优化：BBR 拥塞控制 sysctl ----
-# ⚠ 本文件**必须保留**：安装 kmod-tcp-bbr 只是提供 tcp_bbr 内核模块（自动加载），
-#   **不会自动启用 BBR** —— 已核对官方 25.12 rockchip 内核配置（kernel 6.12）：
-#   CONFIG_DEFAULT_TCP_CONG="cubic"，即默认算法仍是 cubic，必须靠 sysctl 显式切换。
-# 官方 /etc/init.d/sysctl 依次加载 /etc/sysctl.d/*.conf 与 /etc/sysctl.conf；
-# 该目录虽不参与 sysupgrade 备份，但本文件由固件自带，升级后依然存在。
-# 内核 4.13+ 在无 fq 队列时 BBR 使用 TCP 内部 pacing 兜底，可直接启用；
-# 如需最优配对，可自行安装 kmod-sched（含 sch_fq）后取消第二行注释。
-mkdir -p "$BUILDER_DIR/files/etc/sysctl.d"
-cat << 'EOF' > "$BUILDER_DIR/files/etc/sysctl.d/99-bbr.conf"
-# BBR TCP congestion control (kmod-tcp-bbr is built into this firmware)
-# net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-EOF
-echo "---- files/etc/sysctl.d/99-bbr.conf ----"
-cat "$BUILDER_DIR/files/etc/sysctl.d/99-bbr.conf"
+# ---- TCP 拥塞控制：维持官方默认 cubic（不启用 BBR）----
+# 已核实：安装 kmod-tcp-bbr 只提供 tcp_bbr 模块（经 /etc/modules.d 自动加载），
+# **并不会自动启用**——官方 25.12 内核（6.12）配置为 CONFIG_DEFAULT_TCP_CONG="cubic"。
+# 本项目决定维持官方默认 cubic 不动，不预装 kmod-tcp-bbr、不写 sysctl。
+# 如需 BBR，设备端手动执行：
+#   apk add kmod-tcp-bbr
+#   echo 'net.ipv4.tcp_congestion_control = bbr' > /etc/sysctl.d/99-bbr.conf
+#   /etc/init.d/sysctl restart   # 或重启
+# 内核 4.13+ 在无 fq 队列时 BBR 使用 TCP 内部 pacing 兜底；最优配对可另装 kmod-sched（含 sch_fq）。
 
 if [ -z "$CUSTOM_PACKAGES" ]; then
   echo "⚪️ 未选择 任何第三方软件包"
@@ -112,11 +105,8 @@ PACKAGES="$PACKAGES luci-app-cpufreq"
 PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
 # 文件管理器（OpenWrt 官方源，含独立 i18n 包）
 PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
-# ---- 中国大陆优化：BBR TCP 拥塞控制 ----
-# kmod-tcp-bbr 来自官方 kmods feed（25.12.5 rockchip/armv8 已核实存在），
-# 模块自带 AutoProbe（/etc/modules.d/ 开机自动加载）；
-# sysctl 开关由下方写入 files/etc/sysctl.d/99-bbr.conf。
-PACKAGES="$PACKAGES kmod-tcp-bbr"
+# ---- TCP 拥塞控制：维持官方默认 cubic，不预装 kmod-tcp-bbr ----
+# 原因与设备端手动启用 BBR 的方法见上方「TCP 拥塞控制」注释块。
 # ======== shell/custom-packages.sh =======
 # 合并 OpenWrt 官方源以外的第三方插件
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
