@@ -78,8 +78,9 @@
      （该源没有语言包，不加 i18n）；「三」B 组列出全部 47 个可用短名。
    少数非 `luci-app-*` 形式的包（`luci-proto-*` / `luci-mod-*` / openclash）
    取消 `custom-packages.sh` 2.3 对应行注释即可；passwall 用 B 组短名启用。
-   > ⚠️ **例外：已内置中文的 app 包。** 默认启用的 `cpufreq` / `diskman`
-   > 两个 app 包（仅第三方源提供，版本 `27.150.x`）**自带简体中文**
+   > ⚠️ **例外：已内置中文的 app 包。** `cpufreq` / `diskman`
+   > 两个 app 包（仅第三方源提供，版本 `27.150.x`，默认不装，
+   > 取消 `rockchip/build.sh` 中对应行注释即可启用）**自带简体中文**
    > （内含 `usr/lib/lua/luci/i18n/*.zh-cn.lmo` 与 `etc/uci-defaults/luci-i18n-*`）；
    > 注释中的可选项 `argon-config` 同样如此。
    > 若再装同名的独立语言包 `luci-i18n-<短名>-zh-cn`，apk 会因

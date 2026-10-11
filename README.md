@@ -230,10 +230,11 @@ DLLKIDS_KEY_URL="https://down.dllkids.xyz/openwrt-feed/keys/dllkids-feed.pub.pem
   例：`ENABLE_APPS="filemanager sqm ttyd"`。A 组共 **82** 个可用短名（已逐一校验）。
 - **仅第三方源提供的应用**：把短名填进 `THIRD_PARTY_APPS`，
   只展开 `luci-app-<短名>`、不加 i18n 包（该源无语言包）。B 组共 **47** 个可用短名。
-- **例外**：默认启用的 `cpufreq` / `diskman` 两个 app 包（第三方源，版本 `27.150.x`）
-  **已内置简体中文**，不要给它们手工追加 `luci-i18n-<短名>-zh-cn` ——
+- **例外**：`cpufreq` / `diskman` 两个 app 包（第三方源，版本 `27.150.x`，
+  **默认不装**，取消 `rockchip/build.sh` 中对应行注释即可启用）
+  **已内置简体中文**，启用时不要手工追加 `luci-i18n-<短名>-zh-cn` ——
   否则 apk 会因文件冲突报 `trying to overwrite ... owned by luci-app-...` 使
-  `make image` 失败。（注释中的可选项 `argon-config` 同样内置中文、同样适用此规则。）
+  `make image` 失败。（可选项 `argon-config` 同样内置中文、同样适用此规则。）
 - 少数不是 `luci-app-<短名>` 形式的包（`luci-proto-*` / `luci-mod-*` /
   openclash）：在 2.3 取消对应行注释即可；passwall 用「三」B 组短名启用。
 

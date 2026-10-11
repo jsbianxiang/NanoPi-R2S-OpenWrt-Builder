@@ -83,10 +83,10 @@ PACKAGES="$PACKAGES luci-i18n-base-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
 # ⚠ 第三方源（dllkids）里的 app 包是中文原生的，**没有**独立语言包：
-#   - luci-app-diskman / luci-app-cpufreq（27.150.x）
+#   - luci-app-diskman / luci-app-cpufreq（27.150.x，默认不装，见下方注释行）
 #     包内**自带简体中文**，若再显式安装同名的独立 i18n 包，apk 会因文件冲突报
 #     ERROR: luci-i18n-xxx-zh-cn-...: trying to overwrite ... owned by luci-app-xxx-...
-#     直接中断 make image（package_install 返回 Error 3）。故只装 app 包。
+#     直接中断 make image（package_install 返回 Error 3）。启用时只装 app 包。
 #   - luci-app-nikki 等其余第三方应用同理，不要加 luci-i18n-<名>-zh-cn。
 # ⚠✗ 不默认安装 luci-theme-argon / luci-app-argon-config（实机已验证）：
 #   dllkids 的 argon 是 ImmortalWrt 生态编译包，在官方 OpenWrt 25.12 的 LuCI 上
@@ -96,12 +96,13 @@ PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
 #   luci.main.mediaurlbase='/luci-static/bootstrap' 以便失败时可恢复。
 #PACKAGES="$PACKAGES luci-theme-argon"
 #PACKAGES="$PACKAGES luci-app-argon-config"
-# ✓ 下列 2 个包在官方 OpenWrt 源中不存在、但 dllkids 源里确有 apk
-#   （已核实：luci-app-diskman / luci-app-cpufreq-27.150.x）——
-#   前提是 build.sh 注入了 dllkids 源（见下方注入逻辑）；
-#   若将来移除该源注入，必须同步删除这 2 行，否则 make image 找不到包。
-PACKAGES="$PACKAGES luci-app-diskman"
-PACKAGES="$PACKAGES luci-app-cpufreq"
+# ✓ 下列 2 个包在官方 OpenWrt 源中不存在、仅 dllkids 第三方源提供
+#   （已核实：luci-app-diskman / luci-app-cpufreq-27.150.x）。
+#   按本项目现行默认（PACKAGES 只放官方源软件），两行保持注释；
+#   需要时取消注释启用——前提是 build.sh 注入了 dllkids 源（见下方注入逻辑）；
+#   若将来移除该源注入，必须保持注释，否则 make image 找不到包。
+#PACKAGES="$PACKAGES luci-app-diskman"
+#PACKAGES="$PACKAGES luci-app-cpufreq"
 PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
 # 文件管理器（OpenWrt 官方源，含独立 i18n 包）
 PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
