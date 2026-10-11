@@ -182,6 +182,10 @@ GMAC，由内核直接支持。
 （执行后该脚本自动删除）。脚本采用「先读取并校验全部输入、再写 UCI」的顺序，
 任何一步失败都会记录到 `/etc/openwrt-builder/uci-defaults-log.txt` 并中止，避免写出一半的坏配置。
 
+> 这里的「一次性」是相对**同一次 rootfs** 而言：每次刷机（含「保留配置」）rootfs 都被整镜像
+> `dd` 覆盖，`/etc/uci-defaults/` 里的脚本会全部重新出现并再跑一遍（推导见
+> [`MIGRATIONS.md`](MIGRATIONS.md) §5.1）。所以本脚本也同时承担了「升级后修配置」的职责。
+
 | 分类 | 项 | 说明 |
 | --- | --- | --- |
 | 网络 | WAN / WAN6 按工作流输入写入 | `dhcp` 或 `static`（CIDR 列表记法），WAN 固定 `eth0`；WAN6 为 DHCPv6 + `norelease='1'`（重启时不发 RELEASE，降低上级回收地址导致前缀变化的概率） |
@@ -190,10 +194,67 @@ GMAC，由内核直接支持。
 | 网络 | 删除 `network.globals.ula_prefix` | 去掉自动生成的 ULA 前缀，避免 LAN 双前缀 |
 | 网络 | `packet_steering='1'` | 数据包引导显式开启（与「未设」等价，写出来便于 `uci show` 比对） |
 | DHCP | `dhcp.wan.ignore='1'` | 显式禁用 WAN 侧 DHCP 服务（与官方默认一致，显式写出以防上游变化） |
+| DHCP | `dhcp.lan.dhcpv4='server'` / `dhcpv6='server'` / `ra='server'` | 显式钉死 LAN 侧 DHCPv4 / DHCPv6 / RA。三者消费者不同：`dhcpv4` 由 **dnsmasq** 读（`dnsmasq.init:578,602`），`dhcpv6`/`ra` 由 **odhcpd** 读；odhcpd 内置默认是 `MODE_DISABLED`（`src/config.c:312-314`），选项缺失就等于**关掉 LAN 的 DHCPv6 与 RA** |
+| DHCP | `dhcp.@dnsmasq[0].cachesize` 缺失则补 `1000` | `dnsmasq.init:1028` 只是 `append_parm cachesize "--cache-size"`（无默认），缺失时用 dnsmasq 内置的 `150`；官方 conffile 是 `1000`。**只在缺失时补**，不覆盖用户自设值 |
 | 防火墙 | `synflood_protect='1'` | 显式开启 SYN-flood 防护（官方 25.12 默认已是 1，写出以防上游变化） |
-| 防火墙 | 删除遗留别名 `syn_flood` | 官方 conffile 写的是旧名 `syn_flood`；fw4 与 LuCI 都把 `syn_flood` 迁移到 `synflood_protect`，本项目同样只保留现代选项名 |
+| 防火墙 | 删除遗留别名 `syn_flood` | 官方 conffile 写的是旧名 `syn_flood`；fw4 与 LuCI 都把 `syn_flood` 迁移到 `synflood_protect`，本项目同样只保留现代选项名（详见第 4.1 节） |
 | 大陆优化 | 时区 `Asia/Shanghai`（CST-8） | 官方默认 UTC，改为北京时间 |
 | 大陆优化 | NTP 改用国内服务器 | 阿里 `ntp.aliyun.com` / `ntp1.aliyun.com`、腾讯 `time1.cloud.tencent.com`、`cn.pool.ntp.org`，替换官方 openwrt 池 |
+
+#### 脚本第 4 节：Web 界面「网络」菜单**保存**产生的旧参数名 → 新参数名迁移
+
+这一节的范围严格限定为：在 LuCI 的**「网络」菜单**任一页面点「保存并应用」时，由该页面
+option 的 `o.write` 处理器产生的重命名。**不含**「打开页面时的弹窗迁移」（见第 10 节）
+和「官方首启脚本」——那两类虽然也会改名，但不是「保存」产生的。
+
+「网络」菜单成员（对照 `luci-25.12` 的 `menu.d` JSON）：`luci-mod-network` 的
+`network`(10，接口) / `wireless`(15) / `switch`(20) / `routes`(30) / `dhcp`(40) /
+`dns`(45) / `diagnostics`(50)，以及 `luci-app-firewall` 的
+**`admin/network/firewall`(60)** —— **防火墙也在「网络」菜单下**，它的保存路径同属本节范围。
+
+把「网络」菜单下**全部** `o.write` 处理器过了一遍，真正的旧 → 新重命名只有三处：
+
+| # | 迁移 | 源码位置 | 本项目 | 说明 |
+| --- | --- | --- | --- | --- |
+| ① | `firewall.@defaults[0].syn_flood` → `synflood_protect` | `firewall/zones.js:43-51` | **已实现（4.1）** | 写新名 + 删旧别名。官方无首启脚本；fw4 只有运行期回退（`fw4.uc`：`if (defs.synflood_protect === null) defs.synflood_protect = defs.syn_flood;` 然后 `delete defs.syn_flood;`）。删旧名让 `uci show firewall` 输出唯一 |
+| ② | `network.<route>.netmask` → CIDR 合写进 `target` | `network/routes.js:61-78` | 有意不做 | `o.write` 确是保存路径，但 netifd **仍然解析** `netmask`（`interface-ip.c:53 ROUTE_MASK`、`:458 parse_netmask_string`、`proto.c:47 OPT_NETMASK`），属**等价改写**而非功能迁移；本项目不创建静态路由，没有对象可迁 |
+| ③ | `firewall.<zone>.extra` → `extra_src` / `extra_dest` | `firewall/zones.js:314-341` | 有意不做 | `o.write` 确是保存路径，但整块被 `if (!fw4) { … }` 包住——**只有 fw3 才渲染「Extra iptables arguments」标签页**；本固件是 fw4（manifest：`firewall4 2025.03.17~b6e51575-r2`），该页不存在，永不触发 |
+
+所以第 4 节**只实现 ①**。
+
+> 关于 `syn_flood`：官方 conffile 写的是旧名，LuCI 的复选框 `cfgvalue` 读
+> `synflood_protect` 并以 `syn_flood` 兜底，`o.write` 则是「先 `unset syn_flood`、
+> 再 `set synflood_protect`」。本项目照做：先置新选项、再删旧别名——即使删除步骤异常，
+> fw4 的回退分支仍能兜住防护。`syn_flood` **不是**死选项（fw4 与 LuCI 都识别），
+> 删除属「迁移」而非「清理垃圾」。
+
+#### 脚本第 10 节：非「保存路径」的迁移（冗余加固，可整节删除）
+
+这些**不是** LuCI「网络」菜单保存产生的结果，列在脚本里只为兜底；把 10.1 ~ 10.4
+整节删掉不影响其他章节。
+
+| # | 迁移 | 真实归属 | 节 | 依据 |
+| --- | --- | --- | --- | --- |
+| 1 | `network.<if>.ifname` → `device`（非 bridge、且无 `device` 的接口段） | LuCI **打开页面时**的弹窗（`render()` → `renderIfnameMigration()`），**不是保存** | 10.1 | LuCI `…/view/network/interfaces.js`。**官方首启脚本没有实现**——netifd 至今保留显式向后兼容（`interface.c:53 IFACE_ATTR_IFNAME, /* Backward compatibility */`、`:1091-1093`），所以只有 LuCI 会提示改名 |
+| 2 | `rpcd.@rpcd[0].socket`：`/var/run/ubus.sock` → `/var/run/ubus/ubus.sock` | 官方首启脚本 | 10.2 | `rpcd/files/50-migrate-rpcd-ubus-sock.sh` |
+| 3 | `uhttpd.main.ubus_socket`：同上 | 官方首启脚本 | 10.2 | `uhttpd/files/ubus.default`（安装为 `00_uhttpd_ubus`） |
+| 4 | `uhttpd.main.ubus_prefix` 缺失则补 `/ubus` | 官方首启脚本 | 10.2 | 同上。**关键项**：`uhttpd/main.c:636 if (conf.ubus_prefix && uh_plugin_init("uhttpd_ubus.so"))` —— 该值为空时 uhttpd-mod-ubus **根本不加载**，LuCI 的 `/ubus` RPC 端点不存在 |
+| 5 | `dhcp.@dnsmasq[0].resolvfile`：`/tmp/resolv.conf.auto` → `/tmp/resolv.conf.d/resolv.conf.auto` | 官方首启脚本 | 10.3 | `dnsmasq/files/50-dnsmasq-migrate-resolv-conf-auto.sh`。旧值会让 dnsmasq 读一个不存在的文件并 `touch` 出空文件当上游，**设备自身 DNS 全挂** |
+| 6 | 删除 `system.ntp.enabled` | LuCI **「系统」菜单**（`system/system.js`），非「网络」菜单 | 10.4 | NTP **开启**时是 `uci.unset('system','ntp','enabled')`，只有关闭才写 0。即现代写法「NTP 开」= 该项不存在 |
+
+> **为什么官方首启脚本做过的事还要重复一次？** 每次刷机（含「保留配置」）rootfs 都会被
+> 整镜像 `dd` 覆盖，官方这些一次性脚本会重新出现并再跑一遍（推导见
+> [`MIGRATIONS.md`](MIGRATIONS.md) §5.1），所以它们在正常流程里是冗余的。保留的理由：
+> ① 各自只有几行且幂等；② 这几项一旦是旧值，后果是 **LuCI / DNS 整体不可用**，
+> 值得在本项目自己的脚本里再钉一遍；③ 上游将来删掉这些一次性脚本后仍然有效。
+> **不认同这个取舍就把 10.1 ~ 10.4 整节删掉。**
+
+> 与 LuCI 的一处**有意差异**：LuCI 走 ubus 的 `uci set` API 把 `ifname` 写成**空字符串**
+> （rpcd `uci.c` 的 `rpc_uci_merge_set` 把空串当普通值下发，不等于删除），于是会留下
+> `option ifname ''`。本脚本改成真正 `delete`：有效配置完全相同，但不会残留空选项。
+> 其余由上游承担的迁移（桥 `ifname`→`ports`、`release`→`norelease`、dnsmasq `ipset`→段、
+> odhcpd 的 `piofolder`/`hostsfile` 等）也不重复，清单见
+> [`MIGRATIONS.md`](MIGRATIONS.md) §3.3。
 
 > **TCP 拥塞控制**不在首启脚本里：本项目维持官方默认 cubic，不预装
 > `kmod-tcp-bbr`；设备端手动启用 BBR 的方法见上文「中国大陆优化」一节。
@@ -242,7 +303,9 @@ GMAC，由内核直接支持。
 > （`nonwildcard` / `boguspriv` 默认 1、`filterwin2k` / `filter_aaaa` / `filter_a`
 > 默认 0，与官方 conffile 完全相同，属空操作）、
 > wan 段的 `leasetime` / `start` / `limit`（`ignore='1'` 下 WAN 侧本就没有 DHCP 服务）。
-> DHCPv6 / RA / dnsmasq 行为完全沿用官方默认。
+> 现在改为**显式写出**这三个值（`dhcp.lan.dhcpv4/dhcpv6/ra='server'`，与 `15_odhcpd`
+> 写入的官方默认相同）——不是为了改行为，而是让「官方默认」不再依赖 `15_odhcpd`
+> 是否被跳过：保留配置升级时它会走迁移分支、不补默认，选项缺失就会真的关掉 DHCPv6 / RA。
 
 > **另需与上表区分**：`firewall.@defaults[0].syn_flood` 的删除**不属于**「无效/有害项」。
 > `syn_flood` 是 firewall4 与 LuCI 都识别、且**都会主动迁移**的遗留别名
@@ -408,7 +471,7 @@ LuCI 的「软件包」页安装/卸载软件同样经由 uci，所以那里也�
 - 固件**不提供** `/etc/config/firewall`（完全继承 `firewall4` 包的默认配置）；
 - `99-custom.sh` **不修改任何区域（zone）与通信规则的策略**，只做两项全局设置：
   `synflood_protect='1'`（官方默认已是 1，显式写出以防上游变化），并删除官方
-  conffile 里的遗留别名 `syn_flood`（见下节说明，属「迁移」而非「清理垃圾」）。
+  conffile 里的遗留别名 `syn_flood`（脚本第 4.1 节，属「迁移」而非「清理垃圾」）。
   流量卸载（`flow_offloading` / `flow_offloading_hw`）官方默认即关闭，不做改动；
   官方 firewall4 没有 fullcone 选项，此前版本的 `fullcone='0'` 已移除。
   注意：日后若启用 passwall 等 TPROXY 透明代理插件，请**不要**在 LuCI 里开启
@@ -513,7 +576,7 @@ config zone
 ## 从旧固件（ImmortalWrt 时期）保留配置刷机的遗留项
 
 **刷机时若选择「保留配置」（sysupgrade 默认行为 / LuCI 勾选 keep settings），
-`/etc/config` 会沿用旧固件的文件**，于是会出现两类现象（已在实机 `uci show` 中确认）：
+`/etc/config` 会沿用旧固件的文件**，于是会出现三类现象（已在实机 `uci show` 中确认）：
 
 **① 旧配置留下的死选项（官方 netifd / odhcpd 不识别或本就等价）**
 
@@ -537,10 +600,37 @@ config zone
   其中多数与 init 脚本内置默认等价，**只有 `cachesize` 有差异**（官方 conffile `1000`，
   未设时为 dnsmasq 内置的 `150`）。
 
+**③ 旧选项名（有对应的新写法）**
+
+| 遗留写法 | 新写法 | 谁负责迁移 |
+| --- | --- | --- |
+| `firewall.@defaults[0].syn_flood` | `synflood_protect` | `99-custom.sh` **第 4.1 节**（唯一的 LuCI「网络」菜单**保存**路径重命名；fw4 有运行期回退，LuCI 保存时也会改） |
+| `network.<if>.ifname`（非 bridge 段、无 `device`） | `device` | `99-custom.sh` 第 10.1 节（LuCI **打开页面时**弹窗提示改名；官方首启脚本**不**处理） |
+| `system.ntp.enabled` | 删除（「NTP 开」= 不存在） | `99-custom.sh` 第 10.4 节（LuCI **「系统」菜单**，非「网络」菜单） |
+| `config interface type=bridge` + `ifname`；`config device type=bridge` + `ifname` | `config device br-<if>` + `device` / `ports` | 官方首启 `11_network-migrate-bridges`（LuCI 也有等价弹窗） |
+| `network.<if>.release` | `norelease`（**取反**） | 官方首启 `14_migrate-dhcp-release` |
+| `dhcp.@dnsmasq[0].ipset` | 独立 `config ipset` 段 | 官方首启 `50-dnsmasq-migrate-ipset.sh` |
+| `rpcd.@rpcd[0].socket` / `uhttpd.main.ubus_socket` = `/var/run/ubus.sock` | `/var/run/ubus/ubus.sock` | 官方首启脚本 + `99-custom.sh` 第 10.2 节 |
+| `dhcp.@dnsmasq[0].resolvfile` = `/tmp/resolv.conf.auto` | `/tmp/resolv.conf.d/resolv.conf.auto` | 官方首启脚本 + `99-custom.sh` 第 10.3 节 |
+| `network.<route>.netmask` = 掩码 | `target` 用 CIDR | LuCI `routes.js`（本项目**有意不做**：netifd 仍解析 `netmask`，属等价改写；且本项目不建静态路由） |
+| `firewall.<zone>.extra` | `extra_src` / `extra_dest` | LuCI `zones.js`（**仅 fw3**：整块被 `if (!fw4)` 包住，本固件 fw4 上不渲染，永不触发） |
+
+> 完整清单（含每条判据、以及经核实**不是**迁移的项）见
+> [`MIGRATIONS.md`](MIGRATIONS.md) §2 / §3。
+
 ### 处理办法
 
-**推荐：重新刷机时不要保留配置**（全新配置能让 `15_odhcpd` 写入完整官方默认，
-再由 `99-custom.sh` 在其上叠加本项目设置）。
+**最省事：直接重刷一次（保留配置也可以）。** 每次刷机 rootfs 都会被整镜像覆盖，
+`/etc/uci-defaults/` 全部重新执行，于是：
+
+- 官方脚本会自动迁移 ③ 里的桥 / `release` / `ipset` / ubus 路径 / `resolvfile` 几项；
+- `99-custom.sh` 第 4.1 节会补上官方没覆盖的 `syn_flood` → `synflood_protect`，
+  第 10 节会补上 `ifname` → `device` 与删除 `system.ntp.enabled`；
+- `99-custom.sh` 第 7 节会**无条件重写** `dhcp.lan.dhcpv4='server'` / `dhcpv6='server'` /
+  `ra='server'`，并在 `cachesize` 缺失时补回官方值 `1000` —— 也就是把 ② 自动修好。
+
+**若不想重刷**，推荐先手工清一次（`/etc/config` 直接沿用旧固件是这些现象的根因；
+全新配置能让 `15_odhcpd` 写入完整官方默认，再由 `99-custom.sh` 在其上叠加本项目设置）。
 
 **替代：在设备上手动清理 + 补齐**（SSH 执行，改完即生效）：
 
@@ -553,17 +643,42 @@ uci -q delete network.wan.sendclientid
 uci -q delete network.wan6.sendclientid
 uci -q delete dhcp.lan.ra_preference
 
-# ② 补回官方默认（旧脚本曾误删）
+# ② 补回官方默认（旧脚本曾误删；重刷后由 99-custom.sh 第 7 节自动完成）
+uci set dhcp.lan.dhcpv4='server'
 uci set dhcp.lan.dhcpv6='server'
+uci set dhcp.lan.ra='server'
 uci set dhcp.lan.ra_slaac='1'
 uci -q delete dhcp.lan.ra_flags
 uci add_list dhcp.lan.ra_flags='managed-config'
 uci add_list dhcp.lan.ra_flags='other-config'
 
-# ③ 可选：恢复官方 dnsmasq 缓存大小
+# ③ 恢复官方 dnsmasq 缓存大小（重刷后由 99-custom.sh 第 7 节自动补齐）
 uci set dhcp.@dnsmasq[0].cachesize='1000'
 
-# ④ 删除旧版本误放在 /etc/config/ 下的构建期辅助文件
+# ④ 迁移旧选项名（重刷后由 99-custom.sh 第 4 / 10 节 + 官方首启脚本自动完成）
+#    —— 非 bridge 接口的 ifname → device
+for s in $(uci show network | sed -n 's/^network\.\([^=]*\)=interface$/\1/p'); do
+	[ -z "$(uci -q get "network.$s.device")" ] || continue
+	i="$(uci -q get "network.$s.ifname")"; [ -n "$i" ] || continue
+	[ "$(uci -q get "network.$s.type")" = bridge ] && continue
+	uci set "network.$s.device=$i"; uci -q delete "network.$s.ifname"
+done
+#    —— 防火墙遗留别名
+uci -q delete firewall.@defaults[0].syn_flood
+uci set firewall.@defaults[0].synflood_protect='1'
+#    —— 过时的 NTP 开关（「开」= 该项不存在）
+uci -q delete system.ntp.enabled
+#    —— ubus 路径（写错会让 LuCI / DNS 整体不可用）
+[ "$(uci -q get rpcd.@rpcd[0].socket)" = /var/run/ubus.sock ] &&
+	uci set rpcd.@rpcd[0].socket='/var/run/ubus/ubus.sock'
+[ "$(uci -q get uhttpd.main.ubus_socket)" = /var/run/ubus.sock ] &&
+	uci set uhttpd.main.ubus_socket='/var/run/ubus/ubus.sock'
+[ -n "$(uci -q get uhttpd.main.ubus_prefix)" ] ||
+	uci set uhttpd.main.ubus_prefix='/ubus'
+[ "$(uci -q get dhcp.@dnsmasq[0].resolvfile)" = /tmp/resolv.conf.auto ] &&
+	uci set dhcp.@dnsmasq[0].resolvfile='/tmp/resolv.conf.d/resolv.conf.auto'
+
+# ⑤ 删除旧版本误放在 /etc/config/ 下的构建期辅助文件
 #    （无后缀 → uci 会把它当 uci 配置包解析，导致 uci / LuCI 软件包页报
 #      "Parse error (invalid command) at line 1, byte 0"；
 #      新版固件已改到 /etc/openwrt-builder/，且 99-custom.sh 首启会自动清掉它，
@@ -573,6 +688,8 @@ rm -f /etc/config/wan-settings
 uci commit
 /etc/init.d/odhcpd restart
 /etc/init.d/dnsmasq restart
+/etc/init.d/rpcd restart
+/etc/init.d/uhttpd restart
 ```
 
 ---
