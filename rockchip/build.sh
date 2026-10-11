@@ -103,9 +103,9 @@ PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
 #   若将来移除该源注入，必须保持注释，否则 make image 找不到包。
 #PACKAGES="$PACKAGES luci-app-diskman"
 #PACKAGES="$PACKAGES luci-app-cpufreq"
-PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
-# 文件管理器（OpenWrt 官方源，含独立 i18n 包）
-PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
+# ttyd 网页终端 / 文件管理器（官方源，均带独立 i18n 包）默认不装；
+# 需要时在 shell/custom-packages.sh 的 ENABLE_APPS 里填 ttyd / filemanager 启用
+#（自动展开 luci-app-<短名> + luci-i18n-<短名>-zh-cn）。
 # ---- TCP 拥塞控制：维持官方默认 cubic，不预装 kmod-tcp-bbr ----
 # 原因与设备端手动启用 BBR 的方法见上方「TCP 拥塞控制」注释块。
 # ======== shell/custom-packages.sh =======

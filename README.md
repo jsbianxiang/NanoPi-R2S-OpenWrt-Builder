@@ -130,8 +130,10 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
     官方源，需重新替换（重新跑一次构建即可）。
 - **网络 / DHCP / 防火墙的调优**由 `99-custom.sh` 在首启写入，
   逐项说明见下文「首启初始化（`99-custom.sh`）」。
-- **网页终端 / SSH 只监听局域网**：`ttyd` 监听 `br-lan`、`dropbear` 监听 LAN 地址，
-  均保持上游默认 —— `99-custom.sh` **不**把它们放开到所有接口。
+- **网页终端 / SSH 只监听局域网**：默认固件**不含** ttyd（需要时用
+  `ENABLE_APPS` 加 `ttyd` 启用）与 filemanager；`dropbear` 监听 LAN 地址。
+  若启用了 ttyd，它监听 `br-lan`——两者均保持上游默认，
+  `99-custom.sh` **不**把它们放开到所有接口。
 - 上述行为全部由 `files/etc/uci-defaults/99-custom.sh` 定义，可按需修改。
 
 ### R2S 网口对应关系（重要）
