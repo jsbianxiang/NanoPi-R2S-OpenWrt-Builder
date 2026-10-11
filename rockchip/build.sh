@@ -173,9 +173,10 @@ fi
 # 重要：
 #   - OpenWrt 官方源不含代理类插件与 ImmortalWrt 系应用，
 #     第三方包全部依赖本源；不注入则 make image 会因找不到包而失败。
-#   - r2s-seed.config 启用了 CONFIG_SIGNATURE_CHECK=y，
+#   - 官方 Image Builder 预置 .config 已启用 CONFIG_SIGNATURE_CHECK=y
+#     （Config-build.in 中 SIGNATURE_CHECK 默认 y），
 #     因此 apk 会校验源签名 —— 必须提供公钥，
-#     否则安装时安装会报 "UNTRUSTED signature"。
+#     否则安装时会报 "UNTRUSTED signature"。
 #
 # 说明：
 #   - 内核为官方原版，第三方包依赖的 kmod
@@ -276,6 +277,10 @@ ls -l files/etc/apk/keys/
 # =========================================================
 PACKAGES=$(printf '%s\n' $PACKAGES | awk '!seen[$0]++' | paste -sd ' ' -)
 echo "去重后待安装包数: $(echo $PACKAGES | wc -w)"
+
+# 保险：确保 apk 签名校验开启。官方预置 .config 默认已为 y；此处幂等补齐，
+# 防止将来镜像变化导致 dllkids 包被 --allow-untrusted 静默放过未验签。
+grep -q '^CONFIG_SIGNATURE_CHECK=y' .config || echo 'CONFIG_SIGNATURE_CHECK=y' >> .config
 
 make image PROFILE=$PROFILE PACKAGES="$PACKAGES" FILES="$BUILDER_DIR/files" ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE
 

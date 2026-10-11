@@ -252,7 +252,6 @@ files/etc/uci-defaults/
   99-custom.sh                            # 首次启动初始化脚本（R2S 专用，网口映射硬编码）
 rockchip/
   build.sh                                # 构建脚本 + dllkids 第三方源注入
-  r2s-seed.config                         # Image Builder 配置（机型 + 签名校验）
 shell/
   custom-packages.sh                      # 可选软件包开关（第三方插件默认 Clashoo）
 README.md                                 # 本文件
