@@ -13,6 +13,32 @@ echo "Building for ROOTFS_PARTSIZE: $ROOTFS_PARTSIZE"
 BUILDER_DIR="/builder"
 cd "$BUILDER_DIR" || exit 1
 
+# =========================================================
+# 中国大陆优化：软件源切换到中科大（USTC）镜像
+# =========================================================
+# 官方 Image Builder 的 repositories（每行一个 URL，apk 格式）全部指向
+# downloads.openwrt.org，国内直连慢且不稳定。这里：
+#   1. 先把官方源完整备份为 repositories.official.bak（幂等：已存在则不覆盖）；
+#   2. 再把 downloads.openwrt.org/releases/ 整体替换为
+#      mirrors.ustc.edu.cn/openwrt/releases/（目录结构与官方逐位一致，
+#      包与签名完全相同，仅下载通道不同；kmods 含版本哈希的路径同样适用）。
+# dllkids 源是后续追加的独立行，不在替换范围内。
+# 幂等：重复运行不会二次备份、不会重复替换。
+USTC_MIRROR="https://mirrors.ustc.edu.cn/openwrt/releases/"
+OFFICIAL_URL="https://downloads.openwrt.org/releases/"
+if [ -f repositories ] && ! grep -q "mirrors.ustc.edu.cn" repositories; then
+    cp -f repositories repositories.official.bak
+    echo "==> 官方软件源已备份到 repositories.official.bak"
+    sed -i "s#${OFFICIAL_URL}#${USTC_MIRROR}#g" repositories
+    echo "==> 软件源已切换为中科大镜像（USTC）"
+elif grep -q "mirrors.ustc.edu.cn" repositories; then
+    echo "==> 软件源已是中科大镜像，跳过"
+else
+    echo "⚠️ 未找到 repositories 文件，跳过镜像切换" >&2
+fi
+echo "---- repositories（切换后）----"
+cat repositories
+
 echo "Create wan-settings"
 mkdir -p "$BUILDER_DIR/files/etc/config"
 

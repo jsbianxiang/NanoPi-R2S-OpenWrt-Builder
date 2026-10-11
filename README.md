@@ -109,6 +109,13 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
     `/etc/sysctl.d/99-bbr.conf`（`net.ipv4.tcp_congestion_control=bbr`），
     上游拥塞算法由默认 cubic 改为 BBR，可缓解跨境/跨运营商链路吞吐抖动；
     验证方式：`sysctl net.ipv4.tcp_congestion_control`。
+  - **构建期软件源走中科大镜像**：`build.sh` 先把 Image Builder 的官方源
+    `repositories` 备份为 `repositories.official.bak`，再把
+    `downloads.openwrt.org/releases/` 整体替换为
+    `mirrors.ustc.edu.cn/openwrt/releases/`（目录结构与官方逐位一致，
+    包与签名完全相同，仅下载通道不同）。dllkids 第三方源不在替换范围内；
+    想改回官方直连，把 `repositories.official.bak` 覆盖回 `repositories`
+    或删除 `build.sh` 中「软件源切换」一节即可。
 - **网络 / DHCP / 防火墙的调优**由 `99-custom.sh` 在首启写入，
   逐项说明见下文「首启初始化（`99-custom.sh`）」。
 - **网页终端 / SSH 只监听局域网**：`ttyd` 监听 `br-lan`、`dropbear` 监听 LAN 地址，
