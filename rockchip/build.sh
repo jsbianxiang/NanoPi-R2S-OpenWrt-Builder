@@ -13,32 +13,6 @@ echo "Building for ROOTFS_PARTSIZE: $ROOTFS_PARTSIZE"
 BUILDER_DIR="/builder"
 cd "$BUILDER_DIR" || exit 1
 
-# =========================================================
-# 中国大陆优化：软件源切换到中科大（USTC）镜像
-# =========================================================
-# 官方 Image Builder 的 repositories（每行一个 URL，apk 格式）全部指向
-# downloads.openwrt.org，国内直连慢且不稳定。这里：
-#   1. 先把官方源完整备份为 repositories.official.bak（幂等：已存在则不覆盖）；
-#   2. 再把 downloads.openwrt.org/releases/ 整体替换为
-#      mirrors.ustc.edu.cn/openwrt/releases/（目录结构与官方逐位一致，
-#      包与签名完全相同，仅下载通道不同；kmods 含版本哈希的路径同样适用）。
-# dllkids 源是后续追加的独立行，不在替换范围内。
-# 幂等：重复运行不会二次备份、不会重复替换。
-USTC_MIRROR="https://mirrors.ustc.edu.cn/openwrt/releases/"
-OFFICIAL_URL="https://downloads.openwrt.org/releases/"
-if [ -f repositories ] && ! grep -q "mirrors.ustc.edu.cn" repositories; then
-    cp -f repositories repositories.official.bak
-    echo "==> 官方软件源已备份到 repositories.official.bak"
-    sed -i "s#${OFFICIAL_URL}#${USTC_MIRROR}#g" repositories
-    echo "==> 软件源已切换为中科大镜像（USTC）"
-elif grep -q "mirrors.ustc.edu.cn" repositories; then
-    echo "==> 软件源已是中科大镜像，跳过"
-else
-    echo "⚠️ 未找到 repositories 文件，跳过镜像切换" >&2
-fi
-echo "---- repositories（切换后）----"
-cat repositories
-
 echo "Create wan-settings"
 mkdir -p "$BUILDER_DIR/files/etc/config"
 
@@ -255,6 +229,32 @@ $DLLKIDS_FEED
 EOF
 
 cp -f keys/dllkids-feed.pub.pem files/etc/apk/keys/dllkids-feed.pub.pem
+
+# =========================================================
+# 中国大陆优化：设备端官方源「先备份，后切换中科大镜像」
+# =========================================================
+# 固件内 /etc/apk/repositories.d/distfeeds.list（apk 包生成，指向
+# downloads.openwrt.org）国内直连慢。Image Builder 根目录的官方
+# repositories 文件与设备端 distfeeds.list 同源同 URL 集——含 kmods
+# 的内核版本哈希路径，以它为蓝本生成最可靠：
+#   1. 官方原文备份 → /etc/apk/repositories.d/distfeeds.list.official.bak
+#      （.bak 后缀不会被 apk 当作源读取，仅作回滚底稿）；
+#   2. downloads.openwrt.org/releases/ → mirrors.ustc.edu.cn/openwrt/releases/
+#      覆盖写入 distfeeds.list。USTC 镜像与官方目录逐位一致、签名相同，
+#      仅下载通道不同；dllkids 源在 customfeeds.list，不受影响。
+# 注意：distfeeds.list 不是 conffile，sysupgrade 升级后会随 apk 包恢复为
+# 官方源（备份文件同样会被清掉），届时需重新替换——本脚本重跑构建即可。
+if [ -f repositories ]; then
+    cp -f repositories files/etc/apk/repositories.d/distfeeds.list.official.bak
+    sed 's#https://downloads.openwrt.org/releases/#https://mirrors.ustc.edu.cn/openwrt/releases/#g' \
+        repositories > files/etc/apk/repositories.d/distfeeds.list
+    echo "---- 设备端官方源备份（distfeeds.list.official.bak）----"
+    cat files/etc/apk/repositories.d/distfeeds.list.official.bak
+    echo "---- 设备端 distfeeds.list（已切换中科大镜像）----"
+    cat files/etc/apk/repositories.d/distfeeds.list
+else
+    echo "⚠️ 未找到 Image Builder 的 repositories 文件，设备端源保持官方默认" >&2
+fi
 
 echo "---- 随固件发布的第三方源 ----"
 cat files/etc/apk/repositories.d/customfeeds.list
