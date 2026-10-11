@@ -504,7 +504,7 @@ log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wa
 # （maindhcp=0）。dnsmasq 行为由官方 conffile 决定。
 # ⚠ 但 15_odhcpd 开头是 `if [ -n "$(uci -q get dhcp.odhcpd)" ]; then ... exit 0; fi`：
 #   保留配置升级时 dhcp.odhcpd 已存在 ⇒ 它只做四个选项迁移就退出，**不补**上面那批
-#   默认值（见 MIGRATIONS.md §5.2）。所以 dhcpv6 / ra 必须自己写一遍。
+#   默认值（见 MIGRATIONS.md §5.2）。所以 dhcpv6 / ra / ra_flags 必须自己写一遍。
 #
 # 因此此前版本对等价默认值的「防御性删除/重写」已移除，其中：
 #   - 删 dhcpv6 尤其有害：odhcpd 内置默认是 MODE_DISABLED，删掉 15_odhcpd 写入的
@@ -526,10 +526,24 @@ log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wa
 # dhcpv6 / ra 则**必须**写：odhcpd 的内置默认是 MODE_DISABLED
 # （odhcpd src/config.c:312-314 `iface->dhcpv4/dhcpv6/ra = MODE_DISABLED;`），
 # 而这两个选项**没有** dnsmasq 兜底 ⇒ 缺失就等于关掉 LAN 的 DHCPv6 与 RA。
+#
+# ra_flags 同样**必须**写，而且理由与上面相反（它「不写 ≠ 官方值」）：
+#   - odhcpd 的内置默认**只有 O 标志**（src/config.c:332
+#     `iface->ra_flags = ND_RA_FLAG_OTHER;`），即「不写 == managed-config 缺失」；
+#   - 该选项**一旦出现**，odhcpd 会先把值清零再解析（src/config.c:1508-1513
+#     `iface->ra_flags = 0; parse_ra_flags(&iface->ra_flags, c)`），
+#     所以写了就必须写全，写漏的项**不会**回退到内置默认；
+#   - 官方 15_odhcpd 写的是 `managed-config` + `other-config`（M=1, O=1）。
+# 缺 M 标志时客户端不会通过 DHCPv6 索取地址（只走 SLAAC），dhcpv6='server'
+# 就形同虚设。另外 LuCI 的「RA 标识」是多选框、占位符是 "none"：该字段为空
+# （或残留 LuCI 删段时写入的字面量 'none'，odhcpd 解析失败并清零）时，
+# 连 O 标志都会丢。
 # ---------------------------------------------------------------------------
-# LAN 的 DHCPv6 / RA 显式钉死为 server（dhcpv4 不需要，见上）。
+# LAN 的 DHCPv6 / RA 显式钉死为 server，并补上官方默认的 M+O 标志
+# （dhcpv4 不需要，见上）。
 uci_do set dhcp.lan.dhcpv6='server'
 uci_do set dhcp.lan.ra='server'
+uci_do set dhcp.lan.ra_flags='managed-config' 'other-config'
 
 # 补齐官方 dnsmasq conffile 的 DNS 缓存大小。
 # dnsmasq.init 只有 `append_parm "$cfg" cachesize "--cache-size"`（dnsmasq.init:1028，

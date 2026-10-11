@@ -193,7 +193,7 @@ GMAC，由内核直接支持。
 | 网络 | LAN 地址改用 CIDR 列表记法 | `list ipaddr '192.168.2.1/24'` 取代 `ipaddr` + `netmask`，netifd 从前缀长度推掩码；LAN 固定 `eth1` |
 | 网络 | LAN IPv6 规划 | `delegate='0'` + `ip6assign='64'` + `ip6ifaceid='eui64'` |
 | 网络 | 删除 `network.globals.ula_prefix` | 去掉自动生成的 ULA 前缀，避免 LAN 双前缀 |
-| DHCP | `dhcp.lan.dhcpv6='server'` / `ra='server'` | 显式钉死 LAN 侧 DHCPv6 与 RA。这两个选项由 **odhcpd** 读，而 odhcpd 内置默认是 `MODE_DISABLED`（`src/config.c:312-314`），**没有** dnsmasq 兜底 ⇒ 缺失就等于关掉 LAN 的 DHCPv6 与 RA |
+| DHCP | `dhcp.lan.dhcpv6='server'` / `ra='server'` / `ra_flags='managed-config other-config'` | 显式钉死 LAN 侧 DHCPv6 与 RA。前两项由 **odhcpd** 读，其内置默认是 `MODE_DISABLED`（`src/config.c:312-314`），**没有** dnsmasq 兜底 ⇒ 缺失就等于关掉 LAN 的 DHCPv6 与 RA；`ra_flags` 的内置默认**只有 O 标志**（`src/config.c:332`），缺 M 标志时客户端不会通过 DHCPv6 取地址，且该选项一旦存在就被清零后重新解析（`:1508-1513`），所以必须写全 |
 | DHCP | `dhcp.@dnsmasq[0].cachesize` 缺失则补 `1000` | `dnsmasq.init:1028` 只是 `append_parm cachesize "--cache-size"`（无默认），缺失时用 dnsmasq 内置的 `150`；官方 conffile 是 `1000`。**只在缺失时补**，不覆盖用户自设值 |
 | 防火墙 | `synflood_protect='1'` | 显式开启 SYN-flood 防护（官方 25.12 默认已是 1，写出以防上游变化） |
 | 防火墙 | 删除遗留别名 `syn_flood` | 官方 conffile 写的是旧名 `syn_flood`；fw4 与 LuCI 都把 `syn_flood` 迁移到 `synflood_protect`，本项目同样只保留现代选项名（详见第 4.1 节） |
@@ -249,6 +249,7 @@ option 的 `o.write` 处理器产生的重命名。**不含**「打开页面时�
 | `network.wan=interface`、`network.wan6=interface` | 不是值写入而是**前置条件**：libuci 的 `uci_set` 有断言 `UCI_ASSERT(ctx, ptr->s \|\| (!ptr->option && ptr->section))`（`list.c:690`），段不存在时 `uci set <段>.<选项>=…` 会直接报错。同理保留 `require_uci_section` 里真正会被写入的那几个段 |
 | `network.wan6.norelease='1'` | 不写 ≠ 1：`dhcpv6.sh:148` `[ "$norelease" = "1" ] && append opts "-k"`，只有显式 1 才加 `-k` |
 | `dhcp.lan.dhcpv6='server'`、`ra='server'` | odhcpd 内置默认是 `MODE_DISABLED`（`src/config.c:312-314`），且**没有** dnsmasq 兜底；保留配置升级时 `15_odhcpd` 走迁移分支直接 `exit 0`、不补默认（见 [`MIGRATIONS.md`](MIGRATIONS.md) §5.2） |
+| `dhcp.lan.ra_flags='managed-config' 'other-config'` | **不写 ≠ 官方值**：odhcpd 内置默认只有 O 标志（`src/config.c:332` `iface->ra_flags = ND_RA_FLAG_OTHER;`），缺 M 标志客户端就不会通过 DHCPv6 取地址；而且该选项**一旦出现**就被清零后重新解析（`src/config.c:1508-1513`），写漏的项不会回退到默认 ⇒ 必须写全。LuCI 的「RA 标识」多选框在值为空或残留字面量 `'none'`（LuCI 删除段时写入、odhcpd 解析失败清零）时就显示占位符 `none` |
 | `network.lan.delegate='0'`、`ip6assign='64'`、`ip6ifaceid='eui64'` | 三项都与默认不同：`delegate` 默认 true（`interface.c:1053` `blobmsg_get_bool_default(..., true)`）、`config_generate` 给 LAN 写的是 `ip6assign='60'`、`ip6ifaceid` 默认是固定 ID `::1`（`interface.c:1002-1004`） |
 | `network.lan.proto='static'`、`network.wan.proto=…` | 决定工作流选定的 WAN 模式 / 让 LAN 的 `list ipaddr` 真正生效，不是「补默认」 |
 | `dhcp.@dnsmasq[0].cachesize` | 条件写入（仅缺失时补），官方 conffile 与 dnsmasq 内置值不同（1000 vs 150） |
@@ -621,7 +622,13 @@ config zone
 `[ -n "$(uci -q get dhcp.odhcpd)" ] && ... exit 0`）。保留配置刷机时 `dhcp.odhcpd`
 已存在 → `15_odhcpd` 直接跳过 → 被删掉的官方默认**不会恢复**：
 
-- `dhcp.lan.dhcpv6` 缺失 → odhcpd 内置默认是 `MODE_DISABLED` → **LAN 的 DHCPv6 服务实际是关闭的**；
+- `dhcp.lan.dhcpv6` 缺失 → odhcpd 内置默认是 `MODE_DISABLED` → **LAN 的 DHCPv6 服务实际是关闭的**
+  （LuCI 的「DHCPv6 服务」下拉框把「选项不存在」渲染成 `disabled`，即显示 **「已禁用」**）；
+- `dhcp.lan.ra` 缺失 → 同上，**RA 服务也是关的**；
+- `dhcp.lan.ra_flags` 缺失 → odhcpd 内置默认**只有 O 标志**（`src/config.c:332`），
+  **缺 M 标志** ⇒ 客户端不会通过 DHCPv6 索取地址，只用 SLAAC；若该项残留 LuCI 删段时写入的
+  字面量 `'none'`（odhcpd 解析失败并清零）则连 O 标志也没有。LuCI 的「RA 标识」多选框
+  在为空或为该残留值时显示占位符 **`none`**；
 - `dhcp.lan.ra_slaac` 缺失 → odhcpd 内置默认 `true`，SLAAC 仍工作（所以 IPv6 地址一般还能拿到）；
 - `dhcp.@dnsmasq[0]` 也少了几项官方 conffile 的值（`boguspriv` / `filterwin2k` /
   `nonegcache` / `cachesize` / `resolvfile` / `nonwildcard` / `filter_aaaa` / `filter_a`）——
@@ -658,8 +665,9 @@ config zone
 - 官方脚本会自动迁移 ③ 里的桥 / `release` / `ipset` / ubus 路径 / `resolvfile` 几项；
 - `99-custom.sh` 第 4.1 节会补上官方没覆盖的 `syn_flood` → `synflood_protect`，
   第 10 节会补上 `ifname` → `device`；
-- `99-custom.sh` 第 7 节会**无条件重写** `dhcp.lan.dhcpv6='server'` / `ra='server'`，
-  并在 `cachesize` 缺失时补回官方值 `1000` —— 也就是把 ② 自动修好。
+- `99-custom.sh` 第 7 节会**无条件重写** `dhcp.lan.dhcpv6='server'` / `ra='server'` /
+  `ra_flags='managed-config other-config'`，并在 `cachesize` 缺失时补回官方值 `1000`
+  —— 也就是把 ② 自动修好。
 
 **若不想重刷**，推荐先手工清一次（`/etc/config` 直接沿用旧固件是这些现象的根因；
 全新配置能让 `15_odhcpd` 写入完整官方默认，再由 `99-custom.sh` 在其上叠加本项目设置）。

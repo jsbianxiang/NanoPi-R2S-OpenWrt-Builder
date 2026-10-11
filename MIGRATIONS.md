@@ -121,7 +121,7 @@ uci_apply_defaults() {
 | LuCI `view/system/system.js` | 改时区时**同时写** `zonename`（IANA）+ `timezone`（POSIX TZ 串）；NTP 开关是 `uci.set('system','ntp','enabled',0)` / **`uci.unset('system','ntp','enabled')`** —— 即「NTP 开」= 该项**不存在**（注意：这是**「系统」菜单**，不属「网络」菜单） |
 | LuCI `view/network/routes.js` | 写静态路由时 `uci.unset('network', id, 'netmask')`（改用 CIDR 记法，`routes.js:75-78`） |
 | LuCI `view/network/interfaces.js` | **`ifname` -> `device` / `ports` 迁移**：打开「网络 -> 接口」时检测并弹窗（`renderIfnameMigration()` / `renderBridgeMigration()`），点继续即执行重命名。**触发点是页面打开（`render()`），不是「保存」**（详见 §2.1） |
-| LuCI `view/network/interfaces.js` | `ra_flags`、`dhcpv6_pd_preferred` 的清除规则在 `so.remove`（**删除按钮**）里，不在 `so.write`（保存）里 |
+| LuCI `view/network/interfaces.js` | `ra_flags`、`dhcpv6_pd_preferred` 的清除规则在 `so.remove`（**删除按钮**）里，不在 `so.write`（保存）里。⚠ 删除 DHCP 段时 LuCI 把 `ra_flags` 写成**字面量 `'none'`**（该多选框的 `select_placeholder` 也是 `none`，所以 UI 上就显示 `none`）；odhcpd 的 `parse_ra_flags` 不认这个值、返回 -1，标志保持 0 ⇒ **M=O=0**，比「选项缺失」（只有 O 标志）更糟。§7 现在会把它覆写成官方默认的 M+O |
 | `dnsmasq.init` | 单值 `option dhcp_option` 写法弃用：打 `Warning: the 'option $opt' syntax is deprecated, use 'list $opt'`（应用 `list dhcp_option`） |
 | `luci-base` **postinst**（包安装期，非首启） | 若 `/etc/config/uhttpd` 存在且 `uhttpd.main.ucode_prefix` 不含 `/cgi-bin/luci`，则 `uci add_list uhttpd.main.ucode_prefix='/cgi-bin/luci=/usr/share/ucode/luci/uhttpd.uc'` + `service uhttpd reload` |
 
@@ -250,6 +250,7 @@ uci_apply_defaults() {
 | `network.wan=interface`、`network.wan6=interface` | 不是值写入而是**前置条件**：libuci `uci_set` 有断言 `UCI_ASSERT(ctx, ptr->s \|\| (!ptr->option && ptr->section))`（`list.c:690`），段不存在时 `uci set <段>.<选项>=…` 直接报错 |
 | `network.wan6.norelease='1'` | 不写 ≠ 1：`dhcpv6.sh:148` `[ "$norelease" = "1" ] && append opts "-k"`，只有显式 1 才加 `-k` |
 | `dhcp.lan.dhcpv6='server'`、`ra='server'` | odhcpd 内置默认 `MODE_DISABLED`（`config.c:312-314`），**没有** dnsmasq 兜底；保留配置升级时 `15_odhcpd` 走迁移分支 `exit 0`、不补默认 |
+| `dhcp.lan.ra_flags='managed-config' 'other-config'` | **不写 ≠ 官方值**：odhcpd 内置默认只有 O 标志（`config.c:332` `iface->ra_flags = ND_RA_FLAG_OTHER;`），缺 M 标志客户端不会通过 DHCPv6 取地址；且该选项**一旦出现**即被清零后重新解析（`config.c:1508-1513`），写漏的项不回退到默认 ⇒ 必须写全 |
 | `network.lan.delegate='0'`、`ip6assign='64'`、`ip6ifaceid='eui64'` | 三项都与默认不同：`delegate` 默认 true（`interface.c:1053`）、`config_generate` 给 LAN 写 `ip6assign='60'`、`ip6ifaceid` 默认固定 ID `::1`（`interface.c:1002-1004`） |
 | `dhcp.@dnsmasq[0].cachesize` | 条件写入（仅缺失时补），官方 conffile `1000` ≠ dnsmasq 内置 `150` |
 
