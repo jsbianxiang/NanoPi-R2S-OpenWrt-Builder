@@ -24,7 +24,32 @@ set -f
 LC_ALL=C
 export LC_ALL
 
-LOGFILE='/etc/config/uci-defaults-log.txt'
+# ---------------------------------------------------------------------------
+# 构建期注入的辅助文件统一放在 /etc/openwrt-builder/。
+#
+# ⚠ 不要把任何**非 uci 配置包**的文件放进 /etc/config/：
+#   libuci 会 glob 整个配置目录（file.c: uci_list_config_files() 用
+#   glob("<confdir>/*", GLOB_MARK)），只跳过「文件名含 `.`」的条目
+#   （file.c: get_filename()，源码注释原文 "Filename with '.' are ignored
+#   and not parsed"），其余一律按 uci 语法解析。无后缀文件（如 wan-settings）
+#   会被当成配置包解析，首行 `wan_proto=dhcp` 立刻命中 file.c:553 的
+#   uci_parse_error(ctx, "invalid command")，于是**任何** uci 调用
+#   （含 LuCI「软件包」页的安装动作）都会打印：
+#       uci: Parse error (invalid command) at line 1, byte 0
+#   本脚本自身的日志也遵循该约定，放在 /etc/openwrt-builder/ 下。
+# ---------------------------------------------------------------------------
+SETTINGS_DIR='/etc/openwrt-builder'
+mkdir -p "$SETTINGS_DIR" 2>/dev/null || :
+
+# 迁移兼容：旧版固件把 wan-settings 误放在 /etc/config/ 下（无后缀 → 被 uci
+# 当作配置包解析）。保留配置升级到本版时该文件会被 sysupgrade 带过来，因此
+# 这里在**任何 uci 调用之前**先删掉它，否则本脚本自身的 uci 调用也会刷出
+# "Parse error (invalid command)"，并可能影响 require_uci_section 判定。
+# （/etc/config/ 下旧版遗留的 custom_router_ip.txt、uci-defaults-log.txt 带 `.`
+#  后缀，uci 的 get_filename() 会跳过，无害，故不动它们。）
+rm -f /etc/config/wan-settings 2>/dev/null || :
+
+LOGFILE="$SETTINGS_DIR/uci-defaults-log.txt"
 CR=$(printf '\r')
 
 log() {
@@ -146,8 +171,9 @@ log "Starting 99-custom.sh at $(date)"
 # ---------------------------------------------------------------------------
 # 1. 读取构建阶段生成的 WAN 参数
 # 文件格式为 key=value；只解析数据，不 source，避免把配置内容当 Shell 代码执行。
+# 位置：/etc/openwrt-builder/wan-settings（构建期由 rockchip/build.sh 写入）
 # ---------------------------------------------------------------------------
-SETTINGS_FILE='/etc/config/wan-settings'
+SETTINGS_FILE="$SETTINGS_DIR/wan-settings"
 wan_proto=''
 wan_ip=''
 wan_gateway=''
@@ -213,9 +239,10 @@ fi
 # ---------------------------------------------------------------------------
 # 2. LAN 管理地址
 # custom_router_ip.txt：读取首个非空行；支持空白、CRLF 和带/前缀的 CIDR。
+# 位置：/etc/openwrt-builder/custom_router_ip.txt（工作流生成 custom/ 后随固件注入）
 # ---------------------------------------------------------------------------
 CUSTOM_IP='192.168.2.1'
-IP_VALUE_FILE='/etc/config/custom_router_ip.txt'
+IP_VALUE_FILE="$SETTINGS_DIR/custom_router_ip.txt"
 
 if [ -f "$IP_VALUE_FILE" ]; then
     [ -r "$IP_VALUE_FILE" ] || fail "cannot read $IP_VALUE_FILE"

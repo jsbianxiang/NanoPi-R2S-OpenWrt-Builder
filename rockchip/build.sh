@@ -1,5 +1,5 @@
 #!/bin/bash
-# 构建期日志（注意：固件内的首启日志是 /etc/config/uci-defaults-log.txt，两者不是一回事）
+# 构建期日志（注意：固件内的首启日志是 /etc/openwrt-builder/uci-defaults-log.txt，两者不是一回事）
 source shell/custom-packages.sh
 echo "第三方APK软件包: $CUSTOM_PACKAGES"
 LOGFILE="/tmp/build.log"
@@ -13,8 +13,30 @@ echo "Building for ROOTFS_PARTSIZE: $ROOTFS_PARTSIZE"
 BUILDER_DIR="/builder"
 cd "$BUILDER_DIR" || exit 1
 
-echo "Create wan-settings"
-mkdir -p "$BUILDER_DIR/files/etc/config"
+# ---------------------------------------------------------------------------
+# 构建期注入目录：/etc/openwrt-builder/
+#
+# ⚠ 这些辅助文件**绝不能**放在 /etc/config/ 下。
+#   已核实 libuci 源码（openwrt/uci，file.c）：
+#     - uci_list_config_files() 用 glob("<confdir>/*", GLOB_MARK) **扫描整个目录**；
+#     - get_filename() 只跳过「文件名含 `.`」的条目，源码注释原文：
+#         "Filename with '.' are ignored and not parsed. Uci doesn't
+#          permit config files with '.' in the name and cause parsing problems."
+#       其余条目一律经 uci_validate_package() 后当作 uci 配置包解析
+#       （校验只放行可打印 ASCII，`-` 也允许，挡不住 wan-settings 这种名字）。
+#   ⇒ 无后缀、内容又是 key=value 的 wan-settings 会被当 uci 语法解析，
+#     首行 `wan_proto=dhcp` 不匹配 package/config/option/list 任一关键字，
+#     直接命中 file.c:553 的 uci_parse_error(ctx, "invalid command")。
+#     现象就是**任何** uci 调用都打印：
+#         uci: Parse error (invalid command) at line 1, byte 0
+#     LuCI 的「软件包」页安装软件同样经由 uci，因此也报同一行错误。
+#
+#   约定：/etc/config/ 只放 uci 配置包；构建期辅助文件统一放
+#         /etc/openwrt-builder/（无后缀不会被任何组件扫描）。
+# ---------------------------------------------------------------------------
+SETTINGS_DIR="$BUILDER_DIR/files/etc/openwrt-builder"
+echo "Create $SETTINGS_DIR"
+mkdir -p "$SETTINGS_DIR"
 
 # DNS 留空时回落到网关（光猫一般自带 DNS 转发）
 WAN_DNS="${WAN_DNS:-$WAN_GATEWAY}"
@@ -23,7 +45,7 @@ WAN_PROTO="${WAN_PROTO:-dhcp}"
 
 # 创建 WAN 配置文件（yml 传入 WAN_PROTO / WAN_IP / WAN_GATEWAY / WAN_DNS）
 # 该文件随固件发布，供 99-custom.sh 首次启动时读取
-cat << EOF > "$BUILDER_DIR/files/etc/config/wan-settings"
+cat << EOF > "$SETTINGS_DIR/wan-settings"
 wan_proto=${WAN_PROTO}
 wan_ip=${WAN_IP}
 wan_gateway=${WAN_GATEWAY}
@@ -31,7 +53,7 @@ wan_dns=${WAN_DNS}
 EOF
 
 echo "cat wan-settings"
-cat "$BUILDER_DIR/files/etc/config/wan-settings"
+cat "$SETTINGS_DIR/wan-settings"
 
 # ---- TCP 拥塞控制：维持官方默认 cubic（不启用 BBR）----
 # 已核实：安装 kmod-tcp-bbr 只提供 tcp_bbr 模块（经 /etc/modules.d 自动加载），

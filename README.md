@@ -163,7 +163,7 @@ GMAC，由内核直接支持。
 
 固件**首次启动**时由 `/etc/uci-defaults/99-custom.sh` 一次性写入下列配置
 （执行后该脚本自动删除）。脚本采用「先读取并校验全部输入、再写 UCI」的顺序，
-任何一步失败都会记录到 `/etc/config/uci-defaults-log.txt` 并中止，避免写出一半的坏配置。
+任何一步失败都会记录到 `/etc/openwrt-builder/uci-defaults-log.txt` 并中止，避免写出一半的坏配置。
 
 | 分类 | 项 | 说明 |
 | --- | --- | --- |
@@ -299,13 +299,62 @@ PACKAGES.md                               # 软件包来源与启用方式说明
 SUPPORT.md                                # 支持的机型列表
 LICENSE                                   # 许可证
 .gitattributes                            # 强制 LF 换行（shell 脚本必需）
+.gitignore                                # 忽略构建期产物（files/etc/openwrt-builder、custom 等）
 ```
 
-> 说明：`rockchip/build.sh` 在运行时还会生成 `files/etc/config/wan-settings`、
+> 说明：`rockchip/build.sh` 在运行时还会生成 `files/etc/openwrt-builder/wan-settings`、
 > `files/etc/apk/repositories.d/` 下的
 > `customfeeds.list` / `distfeeds.list` / `distfeeds.list.official.bak` 与
 > `files/etc/apk/keys/` 下的公钥；工作流会生成 `custom/custom_router_ip.txt`。
-> 以上均随固件发布，但**不属于仓库文件**。
+> 以上均随固件发布，但**不属于仓库文件**（已在 `.gitignore` 中忽略）。
+
+### 构建期辅助文件为什么放在 `/etc/openwrt-builder/`
+
+**`/etc/config/` 里只能放 uci 配置包**，这是本项目的一条硬约束，原因是 libuci 的
+目录扫描规则（源：`openwrt/uci` 仓库 `file.c`）：
+
+- `uci_list_config_files()` 用 `glob("<confdir>/*", GLOB_MARK)` **扫描整个目录**，
+  并不按扩展名过滤；
+- `get_filename()` 只跳过「文件名**含 `.`**」的条目，源码注释原文：
+
+  ```c
+  /*
+   * Filename with '.' are ignored and not parsed. Uci doesn't
+   * permit config files with '.' in the name and cause parsing
+   * problems.
+   */
+  ```
+
+- 其余条目经 `uci_validate_package()` 校验（只放行可打印 ASCII，`-` 也允许，
+  挡不住 `wan-settings` 这种名字）后，**一律按 uci 语法解析**。
+
+因此一个无后缀、内容又是 `key=value` 的文件（例如旧版的
+`/etc/config/wan-settings`）会被当成配置包解析：首行 `wan_proto=dhcp` 不匹配
+`package` / `config` / `option` / `list` 任一关键字，直接命中 `file.c:553` 的
+`uci_parse_error(ctx, "invalid command")`。现象是**任何** uci 调用都打印：
+
+```text
+uci: Parse error (invalid command) at line 1, byte 0
+```
+
+LuCI 的「软件包」页安装/卸载软件同样经由 uci，所以那里也会看到同一行错误。
+
+> 结论：构建期注入的辅助文件（`wan-settings`、`custom_router_ip.txt`、
+> `uci-defaults-log.txt`）统一放 `/etc/openwrt-builder/`，与 `/etc/config/` 彻底分开。
+> 工作流中 `custom/` 也因此挂载到 `/builder/files/etc/openwrt-builder/`
+> 而非 `/builder/files/etc/config/`。
+
+> 若你的设备是在**修复前**刷的固件，`/etc/config/wan-settings` 会残留并持续报错。
+> 该文件只在首启时被读取一次，直接删掉即可：
+>
+> ```sh
+> rm -f /etc/config/wan-settings
+> ```
+>
+> 新版固件已把该文件移到 `/etc/openwrt-builder/`；并且 `99-custom.sh` 会在首启
+> **任何 uci 调用之前**顺手 `rm -f /etc/config/wan-settings`，因此**保留配置
+> 升级**到新版后该问题会自动消失（无需手动处理）。
+
 
 ---
 
@@ -431,6 +480,13 @@ uci add_list dhcp.lan.ra_flags='other-config'
 
 # ③ 可选：恢复官方 dnsmasq 缓存大小
 uci set dhcp.@dnsmasq[0].cachesize='1000'
+
+# ④ 删除旧版本误放在 /etc/config/ 下的构建期辅助文件
+#    （无后缀 → uci 会把它当 uci 配置包解析，导致 uci / LuCI 软件包页报
+#      "Parse error (invalid command) at line 1, byte 0"；
+#      新版固件已改到 /etc/openwrt-builder/，且 99-custom.sh 首启会自动清掉它，
+#      这里只是给「已经刷了旧固件、暂不重刷」的设备手动补一刀）
+rm -f /etc/config/wan-settings
 
 uci commit
 /etc/init.d/odhcpd restart

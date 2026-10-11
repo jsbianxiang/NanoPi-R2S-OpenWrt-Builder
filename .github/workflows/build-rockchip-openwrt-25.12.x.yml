@@ -139,11 +139,20 @@ jobs:
           #   - 不覆盖容器内 .config（自定义精简 .config 会缺
           #     CONFIG_TARGET_BOARD 等字符串符号，导致 BOARD 解析为空，
           #     make image 报 Missing kernel version/hash file）
+          #
+          # ⚠ custom/ 必须挂到 /builder/files/etc/openwrt-builder/，
+          #   不能挂到 /builder/files/etc/config/：
+          #   libuci 会 glob 整个 /etc/config/ 目录，只跳过文件名含 `.` 的条目
+          #   （openwrt/uci file.c: get_filename()），其余一律当 uci 配置包解析。
+          #   custom_router_ip.txt / wan-settings 这类辅助文件放在 /etc/config/
+          #   会让**任何** uci 调用（含 LuCI 软件包页）报
+          #       uci: Parse error (invalid command) at line 1, byte 0
+          #   详见 rockchip/build.sh 顶部说明。
           docker run --rm -i \
               --user root \
               -v "${{ github.workspace }}/bin:/builder/bin" \
               -v "${{ github.workspace }}/files:/builder/files" \
-              -v "${{ github.workspace }}/custom:/builder/files/etc/config" \
+              -v "${{ github.workspace }}/custom:/builder/files/etc/openwrt-builder" \
               -v "${{ github.workspace }}/shell:/builder/shell" \
               -v "${{ github.workspace }}/rockchip/build.sh:/builder/build.sh" \
               -e PROFILE="$PROFILE" \
