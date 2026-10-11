@@ -79,6 +79,11 @@ PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
 #     直接中断 make image（package_install 返回 Error 3）。故这三个只装 app 包。
 #   - luci-theme-argon（27.246.x）为纯主题，无 i18n 包。
 #   - luci-app-nikki 等其余第三方应用同理，不要加 luci-i18n-<名>-zh-cn。
+# ✓ 下列 4 个包在官方 OpenWrt 源中不存在、但 dllkids 源里确有 apk
+#   （已逐一核实：luci-theme-argon-27.246.x、luci-app-argon-config /
+#   luci-app-cpufreq / luci-app-diskman-27.150.x）——
+#   前提是 build.sh 注入了 dllkids 源（见下方注入逻辑）；
+#   若将来移除该源注入，必须同步删除这 4 行，否则 make image 找不到包。
 PACKAGES="$PACKAGES luci-app-diskman"
 PACKAGES="$PACKAGES luci-app-cpufreq"
 PACKAGES="$PACKAGES luci-theme-argon"
