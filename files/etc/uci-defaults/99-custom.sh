@@ -13,11 +13,15 @@
 # 职责：
 #   ① 旧参数名 -> 新参数名迁移：
 #        第 4 节  = LuCI「网络」菜单**保存**路径的重命名（范围最窄、最贴近用户操作）；
-#        第 10 节 = 非保存路径的迁移（页面弹窗 / 官方首启脚本 / 「系统」菜单），
+#        第 10 节 = 非保存路径的迁移（页面弹窗 / 官方首启脚本），
 #                  属冗余加固，可整节删除。
 #   ② WAN/WAN6、LAN 管理地址、网络选项、DHCP/DNS、防火墙选项；
 #   ③ 中国大陆优化（时区 / 国内 NTP）。
 # 不放开 WAN 入站，不改写固件品牌，不注入第三方插件补丁。
+#
+# 写入原则：**只写与「不写时的生效值」不同的项**。凡是官方 conffile /
+#   config_generate / 消费者的内置默认已经等于我们想要的值，一律不写
+#   （第 5 / 6 / 7 节各有一段注释列明哪些属于这类等价项、依据是什么）。
 #
 # 执行约定：这是 uci-defaults 脚本，不应作为普通运行脚本单独执行。
 # 标准启动流程会在全部默认脚本执行后统一 uci commit；本脚本不提前提交，
@@ -305,8 +309,11 @@ log "LAN management address: $LAN_IP_CIDR"
 command -v uci >/dev/null 2>&1 || fail 'uci command not found'
 require_uci_section 'network.lan'
 require_uci_section 'dhcp.lan'
-require_uci_section 'dhcp.wan'
 require_uci_section 'dhcp.@dnsmasq[0]'
+# 注意这里**不** require dhcp.wan：本脚本不往 dhcp.wan 写任何东西
+# （官方 conffile 已带 `option ignore 1`，属等价项，见第 7 节），
+# 硬性要求它存在只会平添一个无谓的失败点。
+# 同理不 require dhcp.odhcpd——见下面时序说明。
 # 时序说明（已对照官方 openwrt-25.12 源码核实）：
 #   - 网络配置由 preinit 钩子 /lib/preinit/82_config_generate 在 uci-defaults
 #     之前生成（含 /etc/board.json 与 network.globals.ula_prefix='auto'）；
@@ -442,8 +449,17 @@ esac
 uci_do set network.wan6=interface
 uci_do set network.wan6.device='eth0'
 uci_do set network.wan6.proto='dhcpv6'
-uci_do set network.wan6.reqaddress='try'
-uci_do set network.wan6.reqprefix='auto'
+# 这里**不**显式写 reqaddress / reqprefix：两者都与「不写」完全等价。
+#   - reqaddress 缺省时 odhcp6c 收不到 -N 参数，而它的内置默认就是 TRY
+#     （odhcp6c src/config.c:85 `config_dhcp.ia_na_mode = IA_MODE_TRY;`；
+#      显式 'try' 走的 config_set_request_addresses("try") 同样落在 IA_MODE_TRY）；
+#   - reqprefix 缺省与 'auto' 在 proto 层被归一成同一个值
+#     （odhcp6c/files/dhcpv6.sh:101
+#      `[ -z "$reqprefix" -o "$reqprefix" = "auto" ] && reqprefix=0`
+#      ⇒ 两者都发 `-P0`，最终都落到 IA_MODE_TRY）。
+# norelease 则**不是**等价项，必须写：dhcpv6.sh:148
+#   `[ "$norelease" = "1" ] && append opts "-k"`
+# 只有显式 1 才会加 -k（重启/下线时不发 RELEASE，降低上级回收地址导致前缀变化的概率）。
 uci_do set network.wan6.norelease='1'
 
 # ---------------------------------------------------------------------------
@@ -460,14 +476,22 @@ uci_do set network.lan.delegate='0'
 uci_do set network.lan.ip6assign='64'
 uci_do set network.lan.ip6ifaceid='eui64'
 
-if ! uci -q get network.globals >/dev/null 2>&1; then
-    uci_do set network.globals=globals
-fi
 # 删除自动生成的 ULA 前缀，避免 LAN 同时使用 ULA 与上游分配的 IPv6 前缀。
 # （preinit 阶段 config_generate 写的是 ula_prefix='auto'，随后
 #  /etc/uci-defaults/12_network-generate-ula 在首启时把它落成随机 fdxx::/48。）
+#
+# 这里不再「补 network.globals 段」、也不再写 packet_steering——两者都是等价项：
+#   - network.globals 由 config_generate **无条件**创建
+#     （`delete network.globals; set network.globals='globals';
+#       set network.globals.dhcp_default_duid='auto'`），保留配置升级时它同样存在，
+#     所以「段缺失就补」的分支永远不触发，是死代码；
+#   - packet_steering 的唯一消费者 /etc/init.d/packet_steering 只在值为**字面量 '0'**
+#     时关闭引导（packet-steering.uc: `case '0': disable = true;`）；选项缺失时传进去
+#     的是空串，同样不命中该分支 ⇒「不写」与「写 1」行为完全一致。
+#     （该 init 脚本由 netifd 包安装，`default_postinst` 会对包内所有 /etc/init.d/*
+#      执行 rc.common enable，所以它确实在跑；rockchip 也没有像 mt7621 那样的
+#      uci-defaults 去预设这个值。）
 uci_delete_optional 'network.globals.ula_prefix'
-uci_do set network.globals.packet_steering='1'
 
 log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wan.device) wan6=$(uci -q get network.wan6.device)"
 
@@ -478,6 +502,9 @@ log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wa
 # 已写入官方默认：dhcp.lan 的 dhcpv4/dhcpv6/ra = server（LAN 为静态地址时）、
 # ra_slaac=1、ra_flags managed-config/other-config，以及 dhcp.odhcpd 段
 # （maindhcp=0）。dnsmasq 行为由官方 conffile 决定。
+# ⚠ 但 15_odhcpd 开头是 `if [ -n "$(uci -q get dhcp.odhcpd)" ]; then ... exit 0; fi`：
+#   保留配置升级时 dhcp.odhcpd 已存在 ⇒ 它只做四个选项迁移就退出，**不补**上面那批
+#   默认值（见 MIGRATIONS.md §5.2）。所以 dhcpv6 / ra 必须自己写一遍。
 #
 # 因此此前版本对等价默认值的「防御性删除/重写」已移除，其中：
 #   - 删 dhcpv6 尤其有害：odhcpd 内置默认是 MODE_DISABLED，删掉 15_odhcpd 写入的
@@ -486,22 +513,21 @@ log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wa
 #   - ra_preference='medium'、dnsmasq 五项删除、dns_redirect 删除、wan 段
 #     leasetime/start/limit 均为空操作或与 ignore='1' 下无意义，已移除。
 #
-# 本节的写法是「把官方值显式钉死」：值来自官方 conffile / 官方首启脚本，
-# 写出后配置自解释，且能兜住保留配置升级（此时 15_odhcpd 走迁移分支，
-# 官方默认值不会被补回——见 MIGRATIONS.md §5）。
+# 本节的写法是「只写与官方默认**不同**的值」——凡是「不写也一样」的一律删掉：
+#   - dhcp.wan.ignore：官方 dnsmasq conffile（dnsmasq/files/dhcp.conf）里就有
+#     `config dhcp wan / option ignore 1`，不写也是 1；
+#   - dhcp.lan.dhcpv4：它在本固件上**只有一个有效消费者**——dnsmasq。
+#     dnsmasq.init:578 `config_get dhcpv4 "$cfg" dhcpv4`（无默认）+:602
+#     `if [ "$dhcpv4" != "disabled" ]` ⇒ 缺失（空串）≠ disabled，DHCPv4 照常下发，
+#     即「缺失 == server」。odhcpd 虽然也注册了 IFACE_ATTR_DHCPV4，但
+#     src/config.c:1282 `iface->dhcpv4 = config.main_dhcpv4 ? mode : MODE_DISABLED;`
+#     —— 官方 15_odhcpd 写的 maindhcp=0，odhcpd 的 DHCPv4 恒为 DISABLED，
+#     这个选项对 odhcpd 完全没有影响。
+# dhcpv6 / ra 则**必须**写：odhcpd 的内置默认是 MODE_DISABLED
+# （odhcpd src/config.c:312-314 `iface->dhcpv4/dhcpv6/ra = MODE_DISABLED;`），
+# 而这两个选项**没有** dnsmasq 兜底 ⇒ 缺失就等于关掉 LAN 的 DHCPv6 与 RA。
 # ---------------------------------------------------------------------------
-uci_do set dhcp.wan.ignore='1'
-
-# LAN 的 DHCPv4 / DHCPv6 / RA 显式钉死为 server。
-# 三个选项的消费者不是同一个进程，必须分别写：
-#   - dhcpv4：dnsmasq.init 读（dnsmasq.init:578 `config_get dhcpv4 "$cfg" dhcpv4`，
-#             dnsmasq.init:602 `if [ "$dhcpv4" != "disabled" ]`）；
-#   - dhcpv6 / ra：odhcpd 直接读 /etc/config/dhcp（odhcpd 自带 uci 支持，
-#             src/config.c:156-158 注册 IFACE_ATTR_RA/DHCPV4/DHCPV6）。
-# odhcpd 的内置默认是 MODE_DISABLED（odhcpd src/config.c:312-314
-# `iface->dhcpv4/dhcpv6/ra = MODE_DISABLED;`）——这两个选项一旦缺失，
-# LAN 的 DHCPv6 与 RA 就整体关闭。
-uci_do set dhcp.lan.dhcpv4='server'
+# LAN 的 DHCPv6 / RA 显式钉死为 server（dhcpv4 不需要，见上）。
 uci_do set dhcp.lan.dhcpv6='server'
 uci_do set dhcp.lan.ra='server'
 
@@ -557,9 +583,9 @@ unset _ntp
 # 10. 附录：**非** LuCI「网络」菜单保存路径的迁移（冗余加固，可整节删除）
 #
 # 以下各项**不是** LuCI「网络」菜单点保存产生的结果，列在这里只为兜底。它们分别
-# 属于「打开页面时的弹窗迁移」「官方首启脚本」「LuCI『系统』菜单」，正常刷机流程下
-# 要么用户点一次 LuCI 就自动完成，要么官方脚本已经做过。所以本节是冗余的；
-# 若认为官方脚本足够可靠，可以把 10.1 ~ 10.4 整节删掉，不影响其他章节。
+# 属于「打开页面时的弹窗迁移」和「官方首启脚本」，正常刷机流程下要么用户点一次
+# LuCI 就自动完成，要么官方脚本已经做过。所以本节是冗余的；
+# 若认为官方脚本足够可靠，可以把 10.1 ~ 10.3 整节删掉，不影响其他章节。
 #
 # 关于「保留配置刷机时官方脚本会不会再跑一次」——会：
 #   - rockchip 的 platform_do_upgrade() 是 `dd` 整镜像到分区，**rootfs 被整体替换**，
@@ -669,17 +695,16 @@ fi
 uci_migrate_value 'dhcp.@dnsmasq[0].resolvfile' \
     '/tmp/resolv.conf.auto' '/tmp/resolv.conf.d/resolv.conf.auto'
 
-# --- 10.4 system：删除过时的 ntp.enabled -----------------------------------
+# --- 10.4（已移除）system.ntp.enabled --------------------------------------
 #
-# 来源：LuCI 的**「系统」菜单**（不是「网络」菜单），故不在第 4 节范围内。
-# 其「系统 -> 时间同步」开关在**开启**时是 `uci.unset('system','ntp','enabled')`，
-# 只有关闭时才写 0（luci-mod-system .../view/system/system.js，timesync 页）：
-#   if (!ntpd_enabled) uci.set('system','ntp','enabled', 0);
-#   else               uci.unset('system','ntp','enabled');
-# 即现代配置里「NTP 开」= 该项**不存在**（sysntpd 读不到就当开启）。
-# 本脚本第 8 节要写国内 NTP 服务器，语义就是「NTP 开」，所以按 LuCI 的做法删掉它，
-# 顺带修掉旧固件里可能残留的 enabled=0。
-uci_delete_optional 'system.ntp.enabled'
+# 原先这里会 `uci -q delete system.ntp.enabled`，理由是 LuCI 的「系统 -> 时间同步」
+# 开关在开启时把该项 unset。现在删掉这段，因为它是等价项、而且会越权：
+#   - sysntpd 的默认就是开启：package/utils/busybox/files/sysntpd 的校验串是
+#     `'enabled:bool:1'`（缺省 1），config_generate 也写 `set system.ntp.enabled='1'`
+#     ⇒ 该选项**存在且为 1**、或**缺失**，行为都是「NTP 开」，删除它没有任何效果；
+#   - 唯一会产生差异的情形是旧配置里被显式设成 `enabled='0'`（用户有意关掉 NTP），
+#     此时删掉它反而会把 NTP 重新打开——那是用户的明确选择，不该由本脚本翻转。
+# 第 8 节只负责替换 NTP 服务器列表，不负责改「开/关」。
 
 log '99-custom.sh completed; UCI changes left staged for the uci-defaults runner'
 exit 0

@@ -188,13 +188,16 @@ uci_apply_defaults() {
 | 3 | `uhttpd.main.ubus_socket` 旧路径 -> 新路径 | 官方首启 `00_uhttpd_ubus` | 10.2 | 同上 |
 | 4 | `uhttpd.main.ubus_prefix` 缺失则补 `/ubus` | 官方首启 `00_uhttpd_ubus` | 10.2 | **关键**：`uhttpd/main.c:636 if (conf.ubus_prefix && uh_plugin_init("uhttpd_ubus.so"))` —— 该值为空时 uhttpd-mod-ubus **根本不加载**，LuCI 的 `/ubus` RPC 端点不存在 |
 | 5 | `dhcp.@dnsmasq[0].resolvfile` 旧路径 -> 新路径 | 官方首启 `50-dnsmasq-migrate-resolv-conf-auto.sh` | 10.3 | 兜底。旧值会让 dnsmasq 去读一个不存在的文件并 `touch` 出空文件当上游，**设备自身 DNS 全挂** |
-| 6 | 删除 `system.ntp.enabled` | LuCI **「系统」菜单**（`system/system.js`），非「网络」菜单 | 10.4 | 官方无脚本。现代写法「NTP 开」= 该项不存在；本脚本要写国内 NTP，语义就是开 |
-| 7 | `/etc/config/wan-settings` -> `/etc/openwrt-builder/wan-settings` | 本项目 | 文件头 | 无后缀文件不能放 `/etc/config/`（libuci 会当配置包解析） |
+| 6 | `/etc/config/wan-settings` -> `/etc/openwrt-builder/wan-settings` | 本项目 | 文件头 | 无后缀文件不能放 `/etc/config/`（libuci 会当配置包解析） |
+
+> 原先的第 10.4 节（删除 `system.ntp.enabled`）已删除：它既不是「网络」菜单保存的产物，
+> 又与「不写时的生效值」等价（sysntpd 缺省即「开」），且旧配置若有意设过 `enabled='0'`
+> 时删除反而会越权打开 NTP。判据见 §3.5。
 
 > 为什么 B 类（官方首启脚本）还要重复一次：每次刷机（含「保留配置」）rootfs 都会被整体替换，
 > 官方脚本会重新出现并再跑一遍，所以它们在正常流程里是**冗余**的。重复的理由是
 > ①各自只有几行且幂等；②这几项一旦是旧值，后果是 LuCI / DNS **整体不可用**，值得再钉一遍；
-> ③上游将来删掉这些一次性脚本后仍有效。**不认同这个取舍就把 10.1 ~ 10.4 整节删掉。**
+> ③上游将来删掉这些一次性脚本后仍有效。**不认同这个取舍就把 10.1 ~ 10.3 整节删掉。**
 
 ### 3.3 有意**不**在脚本里重复的官方迁移
 
@@ -216,13 +219,39 @@ uci_apply_defaults() {
 | `network.<if>.multipath` | 官方 netifd 源码里**完全没有**（MPTCP 是 ImmortalWrt 补丁），没有任何新名字可迁移 |
 | `dhcp.lan.ra_preference` | odhcpd 认识它（`src/config.c:177 IFACE_ATTR_RA_PREFERENCE`），只是默认值与官方一致 |
 | `dhcp.lan.ra_slaac` / `dhcp.odhcpd.maindhcp` | odhcpd 内置默认分别是 `true`（`config.c:333`）/ `false`（`config.c:38`），与官方写入值相同 |
-| `dhcp.lan.dhcpv4` / `dhcpv6` / `ra` | **是活选项，且必须显式写**：`dhcpv4` 由 `dnsmasq.init:578,602` 读，`dhcpv6`/`ra` 由 odhcpd 读；odhcpd 内置默认是 `MODE_DISABLED`（`config.c:312-314`），缺失就等于关闭 LAN 的 DHCPv6/RA |
+| `dhcp.lan.dhcpv6` / `ra` | **是活选项，必须显式写**：由 odhcpd 读，odhcpd 内置默认是 `MODE_DISABLED`（`config.c:312-314`），缺失就等于关闭 LAN 的 DHCPv6/RA |
+| `dhcp.lan.dhcpv4` | **活选项，但无需写**（已从脚本移除）：唯一有效消费者 dnsmasq 的 `dnsmasq.init:578`（无默认取值）+ `:602 if [ "$dhcpv4" != "disabled" ]` ⇒ 缺失（空串）≠ `disabled`，照常下发；odhcpd 侧该值被 `maindhcp=0` 门控（`config.c:1282`），恒不生效 |
 | `dhcp.@dnsmasq[0].cachesize` | 活选项，`dnsmasq.init:1028 append_parm "$cfg" cachesize "--cache-size"`（无默认）=> 缺失时用 dnsmasq 内置 `150`，官方 conffile 是 `1000`。本脚本只在**缺失时**补回 |
 | `dhcp` 静态租约的 `name` / `dns` | `dhcp.js:941-949`：`uci.unset` 在 `so.remove`（**删除按钮**）里；`so.write`（保存）反而是 `uci.set(name)` + `uci.set(dns,'1')`。是删除动作，不是重命名 |
 | `dhcp` dnsrecord 的 `hexdata` | `dns.js:474-482 hexencodesave`：保存时若「Raw Data」为空则 `uci.unset(hexdata)`。是保存路径的**删除**，不是旧 -> 新重命名；本项目不建 dnsrecord |
 | firewall `flow_offloading` / `flow_offloading_hw` | `zones.js:91-94`：`uci.set(..., null)` 即「写 null = 删除」，是同一选项名的存 / 删，不是重命名 |
 | firewall zone 改名 / zone 的 `network` 成员变更 | `zones.js:133-138`（`firewall.renameZone()`）、`:188`（`addNetwork`/`deleteNetwork`）：是用户主动改的**内容**，不是参数名迁移 |
-| `dhcp.odhcpd` 段本身缺失 | 由首启 `15_odhcpd` 创建（LAN 为静态地址时还会写 `dhcp.lan.dhcpv4/dhcpv6/ra='server'`、`ra_slaac=1`、`ra_flags`）。本脚本不把它列为硬性前置条件，但第 7 节会**显式钉死**那三个值 |
+| `dhcp.odhcpd` 段本身缺失 | 由首启 `15_odhcpd` 创建（LAN 为静态地址时还会写 `dhcp.lan.dhcpv4/dhcpv6/ra='server'`、`ra_slaac=1`、`ra_flags`）。本脚本不把它列为硬性前置条件，但第 7 节会**显式钉死** `dhcpv6` / `ra` 那两个值（`dhcpv4` 与缺省等价，不写） |
+
+### 3.5 等价项：判定「不写也一样」而**不**写的选项
+
+脚本的写入原则是「**只写与『不写时的生效值』不同的项**」。下表这些曾经写过、现已删除，
+每条都核过源码；它们既不是迁移，也不该写：
+
+| 已不写的项 | 「不写时」的生效值 | 依据 |
+| --- | --- | --- |
+| `network.wan6.reqaddress='try'` | 同样是 `TRY` | 不写时 odhcp6c 收不到 `-N`，其内置默认即 `IA_MODE_TRY`（odhcp6c `src/config.c:85`）；显式 `'try'` 走 `config_set_request_addresses("try")`，落在同一枚举值 |
+| `network.wan6.reqprefix='auto'` | 同样是 `auto` | `odhcp6c/files/dhcpv6.sh:101` `[ -z "$reqprefix" -o "$reqprefix" = "auto" ] && reqprefix=0` —— 空值与 `auto` 在 proto 层归一成同一个值，都发 `-P0` |
+| `network.globals.packet_steering='1'` | 同样是**开启** | 唯一消费者 `/etc/init.d/packet_steering` 只在值为字面量 `'0'` 时关闭引导（`packet-steering.uc`: `case '0': disable = true;`）；缺失时传入空串，不命中该分支。该 init 由 netifd 包安装，`default_postinst` 对包内所有 `/etc/init.d/*` 执行 `rc.common enable`，确实在跑 |
+| 补 `network.globals` 段的 `if ! uci -q get …` 守卫 | 段总是存在 | `config_generate` 无条件写 `delete network.globals; set network.globals='globals'; set network.globals.dhcp_default_duid='auto'` ⇒ 分支永不触发，是死代码 |
+| `dhcp.wan.ignore='1'` | 同样是 `1` | 官方 dnsmasq conffile `files/dhcp.conf` 里就有 `config dhcp wan` / `option ignore 1` |
+| `dhcp.lan.dhcpv4='server'` | 同样是「下发 DHCPv4」 | 见 §3.4 该行（dnsmasq 把缺失当非 `disabled`；odhcpd 侧被 `maindhcp=0` 门控） |
+| 删除 `system.ntp.enabled` | 同样是「NTP 开」 | sysntpd 校验串 `'enabled:bool:1'`（缺省 1），`config_generate` 也写 `enabled='1'` ⇒ 存在为 1 或缺失行为相同；旧配置若有意设 `enabled='0'`，删除反而**越权**打开 NTP |
+
+**保留**的近似项（看似可删、实则不可）：
+
+| 保留项 | 为什么不能删 |
+| --- | --- |
+| `network.wan=interface`、`network.wan6=interface` | 不是值写入而是**前置条件**：libuci `uci_set` 有断言 `UCI_ASSERT(ctx, ptr->s \|\| (!ptr->option && ptr->section))`（`list.c:690`），段不存在时 `uci set <段>.<选项>=…` 直接报错 |
+| `network.wan6.norelease='1'` | 不写 ≠ 1：`dhcpv6.sh:148` `[ "$norelease" = "1" ] && append opts "-k"`，只有显式 1 才加 `-k` |
+| `dhcp.lan.dhcpv6='server'`、`ra='server'` | odhcpd 内置默认 `MODE_DISABLED`（`config.c:312-314`），**没有** dnsmasq 兜底；保留配置升级时 `15_odhcpd` 走迁移分支 `exit 0`、不补默认 |
+| `network.lan.delegate='0'`、`ip6assign='64'`、`ip6ifaceid='eui64'` | 三项都与默认不同：`delegate` 默认 true（`interface.c:1053`）、`config_generate` 给 LAN 写 `ip6assign='60'`、`ip6ifaceid` 默认固定 ID `::1`（`interface.c:1002-1004`） |
+| `dhcp.@dnsmasq[0].cachesize` | 条件写入（仅缺失时补），官方 conffile `1000` ≠ dnsmasq 内置 `150` |
 
 ---
 
@@ -286,7 +315,7 @@ platform_copy_config() { ... cp -af "$UPGRADE_BACKUP" "/mnt/$BACKUP_FILE" ... }
 > 结论：**保留配置刷机时 `15_odhcpd` 不会补回官方默认**（这正是 README 建议「不要保留配置」的原因）；
 > `11_network-migrate-bridges`、`14_migrate-dhcp-release` 会自动迁移网络侧的遗留写法；
 > 而官方没覆盖的 `ifname`（非 bridge 段）由 `99-custom.sh` 第 10.1 节补上；
-> `syn_flood`、`system.ntp.enabled` 分别由第 4.1 / 10.4 节补上。
+> `syn_flood` 由第 4.1 节补上。
 
 ---
 
