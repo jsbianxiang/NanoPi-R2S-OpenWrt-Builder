@@ -107,6 +107,23 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
   luci-mod-admin-full + Bootstrap）。⚠ 官方 IB 默认包**不含** LuCI/uhttpd
   （ImmortalWrt 的 IB 默认带，官方不带）——只装 `luci-i18n-*` / `luci-app-*`
   会拉进 luci-base 但没有 web 服务器，设备上 `/etc/init.d/uhttpd` 都不存在。
+- ⚠ **HTTPS：与官方固件存在差异（尚未补齐）**。官方 25.12.5 的构建配置里有
+  `CONFIG_PACKAGE_luci-ssl=y`（见 `config.buildinfo`），所以官方固件自带
+  uhttpd 自签证书并启用 HTTPS。而 `luci` 集合包本身只等于
+  `luci-light + luci-app-package-manager`，**不含** `luci-ssl`：
+
+  ```make
+  # collections/luci/Makefile
+  LUCI_DEPENDS:= +luci-light +luci-app-package-manager
+  ```
+
+  本仓库 `PACKAGES` 只写了 `luci`，因此**本固件 LuCI 只有 HTTP**。
+  （uhttpd 的出厂 conffile 虽带 `list listen_https 0.0.0.0:443` 与
+  `option cert /etc/uhttpd.crt`，但缺证书文件，uhttpd 会跳过 TLS 监听。）
+  要补齐就在 `rockchip/build.sh` 的 `PACKAGES` 里加一行 `luci-ssl`
+  —— 它会带上 `px5g-mbedtls`，首启自动生成自签证书。
+- **LuCI 界面语言**：`luci.main.lang` 出厂为 `auto`（跟随浏览器语言），
+  不是固定中文；中文浏览器会显示简体，要强制可写 `uci set luci.main.lang='zh_cn'`。
 - **中国大陆优化**（官方默认面向全球，本项目做了以下本土化调整）：
   - **中文界面**：`luci-i18n-base-zh-cn` 预装（浏览器语言为中文时 LuCI 直接显示简体）；
   - **时区**：`Asia/Shanghai`（CST-8，官方默认 UTC）；
@@ -181,24 +198,37 @@ GMAC，由内核直接支持。
 > **TCP 拥塞控制**不在首启脚本里：本项目维持官方默认 cubic，不预装
 > `kmod-tcp-bbr`；设备端手动启用 BBR 的方法见上文「中国大陆优化」一节。
 
-> **首启执行顺序**（已对照官方 `openwrt-25.12` 源码逐项核实）：
+> **首启执行顺序**（已对照官方 `openwrt-25.12` 源码逐项核实；完整迁移清单见
+> [`MIGRATIONS.md`](MIGRATIONS.md)）：
 >
 > 1. **preinit 阶段**：`/lib/preinit/82_config_generate` 生成 `/etc/board.json`
 >    与 `/etc/config/network`（其中 `network.globals.ula_prefix='auto'`）；
 > 2. `/etc/init.d/boot` 的 `uci_apply_defaults()` 按文件名 **ASCII 字母序**执行
->    `/etc/uci-defaults/`：
->    `00_uhttpd_ubus`（uhttpd）→ `10_migrate-shadow` → `11_network-migrate-bridges`
->    → `12_network-generate-ula`（把 `auto` 落成随机 ULA 前缀）→ `13_fix-group-user`
+>    `/etc/uci-defaults/`（`files="$(ls)"`，子 shell 内 source，最后统一 `uci commit`，
+>    成功执行的脚本随即被删除）：
+>    `00_uhttpd_ubus` → `10-fstab` → `10_migrate-shadow` → `11_network-migrate-bridges`
+>    → `12_network-generate-ula`（把 `auto` 落成随机 ULA 前缀）→ `14_migrate-dhcp-release`
 >    → `14_network-generate-duid` → `15_migrate-time-zonename` → **`15_odhcpd`**
 >    （创建 `dhcp.odhcpd`，写入 `dhcp.lan` 的 `dhcpv4/dhcpv6/ra=server`、
->    `ra_slaac=1`、`ra_flags`）→ `50-attendedsysupgrade`（写
->    `/etc/config/attendedsysupgrade`）→ `50-dnsmasq-migrate-*` → `50-dropbear`
->    → `50-migrate-rpcd-ubus-sock.sh` → `50-root-passwd` → **`99-custom.sh`（本仓库）**；
-> 3. 全部执行完毕后统一 `uci commit`，并删除已执行的脚本。
+>    `ra_slaac=1`、`ra_flags`）→ `30_uboot-envtools` → `50-attendedsysupgrade`
+>    （写 `/etc/config/attendedsysupgrade`）→ `50-dnsmasq-migrate-ipset.sh`
+>    → `50-dnsmasq-migrate-resolv-conf-auto.sh` → `50-dropbear`
+>    → `50-migrate-rpcd-ubus-sock.sh` → `50-root-passwd`
+>    → `95-luci-app-attendedsysupgrade-housekeeping` → **`99-custom.sh`（本仓库）**。
 >
 > ⚠ 注意 `15_odhcpd` 排在 `99-custom.sh` **之前**（odhcpd 的**源文件**名叫
 > `odhcpd.defaults`，**安装名**才是 `15_odhcpd`）——本脚本运行时
 > `dhcp.odhcpd` 与 `dhcp.lan` 的 IPv6 选项**都已存在**。
+>
+> ⚠ **`13_fix-group-user` 不在这个列表里**：base-files 的 Makefile 在
+> `ifneq ($(CONFIG_USE_APK),)` 分支中把它 `rm -f` 掉了（apk 固件里
+> `/usr/lib/opkg/info` 也不存在，脚本自身开头就会 `exit 0`）。`20_migrate-feeds`
+> 同理不适用（属 opkg 包）。详见 [`MIGRATIONS.md`](MIGRATIONS.md) §1.1。
+>
+> ⚠ 若选择「保留配置」刷机，`15_odhcpd` **不是完全空转**：`dhcp.odhcpd` 已存在时它会
+> 执行 odhcpd 自己的四个选项迁移（`piofolder`→`piodir`、删 `legacy`、
+> `hostsfile`→`hostsdir`、`leasefile` 旧值）后 `exit 0`，但**官方默认值不会被补回**。
+> 详见 [`MIGRATIONS.md`](MIGRATIONS.md) §5。
 
 > **已移除的无效/有害项**（此前版本存在，经与官方 v25.12.5 源码核对后清理）：
 > `multipath='off'`（官方 netifd 无此选项，MPTCP 属 ImmortalWrt 补丁）、
@@ -217,9 +247,15 @@ GMAC，由内核直接支持。
 > **另需与上表区分**：`firewall.@defaults[0].syn_flood` 的删除**不属于**「无效/有害项」。
 > `syn_flood` 是 firewall4 与 LuCI 都识别、且**都会主动迁移**的遗留别名
 > （见下文「WAN 入站防火墙」一节的选项名说明），删它是为了让配置语义唯一，
-> 而不是因为它无人读取。
+> 而不是因为它无人读取。其余所有「上游自带的迁移」汇总在
+> [`MIGRATIONS.md`](MIGRATIONS.md)。
 
-> **有意不写入的**：`ttyd` / `dropbear` 的监听范围。两个服务保持上游默认、只监听局域网。
+> **有意不写入的**：`ttyd` / `dropbear` 的监听范围。两个服务保持上游默认。
+> 其中 ttyd 的出厂配置是 `option interface '@lan'`（init 把 `@` 前缀解析成网络 `lan`
+> 的设备，即 `br-lan`）；**dropbear 的出厂配置没有 `Interface` 选项**
+> （`dropbear.init` 的 `uci_load_validate` 也没给默认值），因此它监听**所有地址**
+> （`0.0.0.0:22` + `[::]:22`），WAN 侧靠防火墙 `wan` zone 的 `input REJECT` 挡住。
+> 若想让 SSH 也只绑 LAN，需自己加 `uci set dropbear.@dropbear[0].Interface='lan'`。
 > 详见「WAN 入站防火墙」一节。
 
 ---
@@ -302,6 +338,7 @@ shell/
   custom-packages.sh                      # 可选软件包开关（第三方插件默认 Clashoo）
 README.md                                 # 本文件
 PACKAGES.md                               # 软件包来源与启用方式说明
+MIGRATIONS.md                             # 迁移变化总清单（首启/运行期/上游别名，含源码出处）
 SUPPORT.md                                # 支持的机型列表
 LICENSE                                   # 许可证
 .gitattributes                            # 强制 LF 换行（shell 脚本必需）
