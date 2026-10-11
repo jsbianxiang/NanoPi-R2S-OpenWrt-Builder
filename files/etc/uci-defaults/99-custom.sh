@@ -337,9 +337,13 @@ uci_do set dhcp.wan.ignore='1'
 # ---------------------------------------------------------------------------
 # 7. 防火墙
 # 不修改 zone 的 input/forward/output 策略；WAN 入站继续使用官方默认拒绝策略。
-# 注：synflood_protect 显式置 1（官方 25.12 默认已是 1，写出以防上游变化）。
-# 流量卸载（flow_offloading / flow_offloading_hw）官方默认即关闭，不再触碰——
-# 默认固件没有 TPROXY 透明代理插件，无冲突场景；日后若启用 passwall 等
+# 注：synflood_protect 显式置 1。官方默认配置写的是 syn_flood，而 firewall4 实际
+# 读取的是 synflood_protect（fw4.uc 的 defaults 表，无内置默认值），并有回退：
+#   if (defs.synflood_protect === null) defs.synflood_protect = defs.syn_flood;
+# 即官方默认本就开启 SYN flood 防护（synflood_rate 默认 25/second、burst 50）。
+# 这里用现代选项名显式写出，防止上游改名后失效。
+# 流量卸载（flow_offloading / flow_offloading_hw）官方默认即关闭（fw4.uc 内置 "0"），
+# 不再触碰——默认固件没有 TPROXY 透明代理插件，无冲突场景；日后若启用 passwall 等
 # TPROXY 插件，也请勿在 LuCI 开启流量卸载（fast path 会绕过 netfilter 钩子）。
 # 此前版本的 fullcone='0' 已移除：官方 firewall4 无此选项（ImmortalWrt 补丁），
 # 写入只会在配置里留下无人识别的死选项。

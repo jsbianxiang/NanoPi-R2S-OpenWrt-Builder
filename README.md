@@ -322,11 +322,13 @@ LICENSE                                   # 许可证
   流量卸载——flow offload 会让首包之后的流量走 fast path 绕过 netfilter 钩子。
 
 官方 `firewall4` 默认配置的关键部分
-（`package/network/config/firewall/files/firewall.config`，OpenWrt 25.12.5 实测原文）：
+（源：`openwrt/firewall4` 仓库 `root/etc/config/firewall`，25.12 所用版本
+`b6e5157527d361f99ad52eaa6da273cb0f2dfd59` 原文；`firewall4` 的源码由
+`package/network/config/firewall4/Makefile` 以 git 方式拉取，不在主仓库里）：
 
 ```text
 config defaults
-	option synflood_protect	1
+	option syn_flood	1
 	option input		REJECT
 	option output		ACCEPT
 	option forward		REJECT
@@ -344,10 +346,18 @@ config zone
 	list   network		'wan6'
 	option input		REJECT
 	option output		ACCEPT
-	option forward		REJECT
+	option forward		DROP
 	option masq		1
 	option mtu_fix		1
 ```
+
+> **关于 SYN flood 选项名**：默认配置文件里写的是 `syn_flood`，但 firewall4 实际
+> 读取的是 `synflood_protect`（`root/usr/share/ucode/fw4.uc` 中 `defaults` 表：
+> `synflood_protect: [ "bool" ]`，无内置默认值），并有一段向后兼容回退：
+> `if (defs.synflood_protect === null) defs.synflood_protect = defs.syn_flood;`
+> ——因此官方默认**已开启** SYN flood 防护（`synflood_rate` 默认 `25/second`、
+> `synflood_burst` 默认 `50`）。本项目显式写 `synflood_protect='1'`，与官方默认一致，
+> 用现代选项名固定下来以防上游改名。
 
 即 **WAN 入站默认「拒绝」**，不允许从 WAN 侧访问路由器后台。
 
@@ -366,6 +376,66 @@ config zone
 > ttyd 监听 `br-lan`（`option interface '@lan'`，init 会把 `@` 前缀解析成网络 `lan`
 > 的设备），dropbear 监听 LAN 地址（`option Interface 'lan'`，init 会解析成
 > LAN 的 IP 后以 `-p <地址>:22` 启动）。
+
+---
+
+## 从旧固件（ImmortalWrt 时期）保留配置刷机的遗留项
+
+**刷机时若选择「保留配置」（sysupgrade 默认行为 / LuCI 勾选 keep settings），
+`/etc/config` 会沿用旧固件的文件**，于是会出现两类现象（已在实机 `uci show` 中确认）：
+
+**① 旧配置留下的死选项（官方 netifd / odhcpd 不识别或本就等价）**
+
+| 遗留项 | 说明 |
+| --- | --- |
+| `network.lan.multipath` / `network.wan.multipath` / `network.wan6.multipath` | ImmortalWrt 的 MPTCP 补丁选项，**官方 netifd 源码中不存在**（已核实），写入后无人读取 |
+| `network.wan.sendclientid` / `network.wan6.sendclientid` | 选项**确实存在**于官方 netifd（`proto_config_add_string sendclientid`），但未设置时会走 `case "$sendclientid" in ... auto\|*)` 分支，行为与 `auto` **完全等价**——显式写属冗余 |
+| `dhcp.lan.ra_preference='medium'` | 与 odhcpd 默认值相同，纯属旧配置残留 |
+
+**② 官方默认值丢失（比死选项更需要处理）**
+
+旧版脚本（ImmortalWrt 时期）曾执行 `uci delete dhcp.lan.dhcpv6`、`uci delete dhcp.lan.ra_slaac`；
+而 `15_odhcpd` 只在 `dhcp.odhcpd` 段**不存在**时才写入官方默认（它开头就有
+`[ -n "$(uci -q get dhcp.odhcpd)" ] && ... exit 0`）。保留配置刷机时 `dhcp.odhcpd`
+已存在 → `15_odhcpd` 直接跳过 → 被删掉的官方默认**不会恢复**：
+
+- `dhcp.lan.dhcpv6` 缺失 → odhcpd 内置默认是 `MODE_DISABLED` → **LAN 的 DHCPv6 服务实际是关闭的**；
+- `dhcp.lan.ra_slaac` 缺失 → odhcpd 内置默认 `true`，SLAAC 仍工作（所以 IPv6 地址一般还能拿到）；
+- `dhcp.@dnsmasq[0]` 也少了几项官方 conffile 的值（`boguspriv` / `filterwin2k` /
+  `nonegcache` / `cachesize` / `resolvfile` / `nonwildcard` / `filter_aaaa` / `filter_a`）——
+  其中多数与 init 脚本内置默认等价，**只有 `cachesize` 有差异**（官方 conffile `1000`，
+  未设时为 dnsmasq 内置的 `150`）。
+
+### 处理办法
+
+**推荐：重新刷机时不要保留配置**（全新配置能让 `15_odhcpd` 写入完整官方默认，
+再由 `99-custom.sh` 在其上叠加本项目设置）。
+
+**替代：在设备上手动清理 + 补齐**（SSH 执行，改完即生效）：
+
+```sh
+# ① 清理 ImmortalWrt 时期的死选项
+uci -q delete network.lan.multipath
+uci -q delete network.wan.multipath
+uci -q delete network.wan6.multipath
+uci -q delete network.wan.sendclientid
+uci -q delete network.wan6.sendclientid
+uci -q delete dhcp.lan.ra_preference
+
+# ② 补回官方默认（旧脚本曾误删）
+uci set dhcp.lan.dhcpv6='server'
+uci set dhcp.lan.ra_slaac='1'
+uci -q delete dhcp.lan.ra_flags
+uci add_list dhcp.lan.ra_flags='managed-config'
+uci add_list dhcp.lan.ra_flags='other-config'
+
+# ③ 可选：恢复官方 dnsmasq 缓存大小
+uci set dhcp.@dnsmasq[0].cachesize='1000'
+
+uci commit
+/etc/init.d/odhcpd restart
+/etc/init.d/dnsmasq restart
+```
 
 ---
 
