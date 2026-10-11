@@ -13,6 +13,14 @@
   （选对应版本 → `packages/aarch64_generic/`，各 feed 下有 `index.json` 可检索）
 - kmods 源由 Image Builder 自动纳入 `repositories`，无需手工配置
 
+> ℹ️ **与官方发布固件的基线对齐**：官方 Image Builder 的 `DEFAULT_PACKAGES`
+> **不含** LuCI / uhttpd（ImmortalWrt 的 IB 才内置）。官方发布镜像的 LuCI 是
+> 在打包时显式追加 `luci` + `luci-app-attendedsysupgrade` 得到的
+> （可在 firmware-selector.openwrt.org 的 Installed Packages 中核实）。
+> 本项目在 `rockchip/build.sh` 的 `PACKAGES` 中同样以
+> `luci` + `luci-app-attendedsysupgrade` 开头，与官方发布基线保持一致 ——
+> 若删掉这两项，固件将**没有 Web 管理界面**（SSH 仍可用）。
+
 > ⚠️ **OpenWrt 官方源没有**：代理类插件（openclash / passwall / ssr-plus /
 > nikki / clashoo / mihomo 等），以及 ImmortalWrt 系应用
 > （`luci-theme-argon` / `luci-app-argon-config` / `luci-app-diskman` /
@@ -68,9 +76,10 @@
      （该源没有语言包，不加 i18n）；「三」B 组列出全部 47 个可用短名。
    少数非 `luci-app-*` 形式的包（`luci-proto-*` / `luci-mod-*` / openclash）
    取消 `custom-packages.sh` 2.3 对应行注释即可；passwall 用 B 组短名启用。
-   > ⚠️ **例外：已内置中文的 app 包。** `argon-config` / `cpufreq` / `diskman`
-   > 这三个 app 包（仅第三方源提供，版本 `27.150.x`）**自带简体中文**
-   > （内含 `usr/lib/lua/luci/i18n/*.zh-cn.lmo` 与 `etc/uci-defaults/luci-i18n-*`）。
+   > ⚠️ **例外：已内置中文的 app 包。** 默认启用的 `cpufreq` / `diskman`
+   > 两个 app 包（仅第三方源提供，版本 `27.150.x`）**自带简体中文**
+   > （内含 `usr/lib/lua/luci/i18n/*.zh-cn.lmo` 与 `etc/uci-defaults/luci-i18n-*`）；
+   > 注释中的可选项 `argon-config` 同样如此。
    > 若再装同名的独立语言包 `luci-i18n-<短名>-zh-cn`，apk 会因
    > 文件冲突报 `ERROR: ... trying to overwrite ... owned by luci-app-...`，
    > 使 `make image` 以 `package_install Error 3` 失败。
