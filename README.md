@@ -117,6 +117,11 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
     `CONFIG_DEFAULT_TCP_CONG="cubic"`），需额外 sysctl 才生效；本项目保持官方默认。
     如需 BBR，设备端手动执行：
     `apk add kmod-tcp-bbr && echo 'net.ipv4.tcp_congestion_control = bbr' > /etc/sysctl.d/99-bbr.conf && /etc/init.d/sysctl restart`。
+  - **Attended Sysupgrade 服务器保持官方默认**：`50-attendedsysupgrade`
+    （`attendedsysupgrade-common` 包，随 `luci-app-attendedsysupgrade` 装上）
+    写入 `attendedsysupgrade.server.url='https://sysupgrade.openwrt.org'`
+    与 `client.auto_search='0'`。官方服务器在境外，国内使用较慢；
+    本项目**不**擅自换成第三方 ASU 服务器（地址不匹配会导致在线升级失败）。
   - **设备端软件源：先备份官方，再切换中科大镜像**：`build.sh` 以 Image
     Builder 的官方 `repositories`（与设备端 distfeeds 同源，含 kmods 内核
     哈希路径）为蓝本，把官方原文备份到
@@ -175,12 +180,36 @@ GMAC，由内核直接支持。
 > **TCP 拥塞控制**不在首启脚本里：本项目维持官方默认 cubic，不预装
 > `kmod-tcp-bbr`；设备端手动启用 BBR 的方法见上文「中国大陆优化」一节。
 
-> **已移除的无效项**（此前版本存在，经与官方 v25.12.5 源码核对后清理）：
+> **首启执行顺序**（已对照官方 `openwrt-25.12` 源码逐项核实）：
+>
+> 1. **preinit 阶段**：`/lib/preinit/82_config_generate` 生成 `/etc/board.json`
+>    与 `/etc/config/network`（其中 `network.globals.ula_prefix='auto'`）；
+> 2. `/etc/init.d/boot` 的 `uci_apply_defaults()` 按文件名 **ASCII 字母序**执行
+>    `/etc/uci-defaults/`：
+>    `00_uhttpd_ubus`（uhttpd）→ `10_migrate-shadow` → `11_network-migrate-bridges`
+>    → `12_network-generate-ula`（把 `auto` 落成随机 ULA 前缀）→ `13_fix-group-user`
+>    → `14_network-generate-duid` → `15_migrate-time-zonename` → **`15_odhcpd`**
+>    （创建 `dhcp.odhcpd`，写入 `dhcp.lan` 的 `dhcpv4/dhcpv6/ra=server`、
+>    `ra_slaac=1`、`ra_flags`）→ `50-attendedsysupgrade`（写
+>    `/etc/config/attendedsysupgrade`）→ `50-dnsmasq-migrate-*` → `50-dropbear`
+>    → `50-migrate-rpcd-ubus-sock.sh` → `50-root-passwd` → **`99-custom.sh`（本仓库）**；
+> 3. 全部执行完毕后统一 `uci commit`，并删除已执行的脚本。
+>
+> ⚠ 注意 `15_odhcpd` 排在 `99-custom.sh` **之前**（odhcpd 的**源文件**名叫
+> `odhcpd.defaults`，**安装名**才是 `15_odhcpd`）——本脚本运行时
+> `dhcp.odhcpd` 与 `dhcp.lan` 的 IPv6 选项**都已存在**。
+
+> **已移除的无效/有害项**（此前版本存在，经与官方 v25.12.5 源码核对后清理）：
 > `multipath='off'`（官方 netifd 无此选项，MPTCP 属 ImmortalWrt 补丁）、
 > `fullcone='0'`（官方 firewall4 无此选项）、`dns_redirect` 删除（官方无此选项）、
-> `ra_slaac` / `dhcpv6` / `odhcpd.maindhcp` 的防御性删除（uci-defaults 按字母序执行，
-> 这些项在本脚本运行时尚不存在，随后由 `odhcpd.defaults` 写入官方默认）、
-> `ra_preference='medium'` 与 dnsmasq 五项删除（均与官方默认值等价，属空操作）、
+> `ra_slaac` / `odhcpd.maindhcp` 的防御性删除（空操作：odhcpd 内置默认分别为
+> `true` / `false`，与 `15_odhcpd` 写入的官方值一致）、
+> **`dhcpv6` 的防御性删除（有害，必须移除）**：odhcpd 内置默认是 `MODE_DISABLED`，
+> 删掉 `15_odhcpd` 先写入的 `'server'` 会**关掉 LAN 的 DHCPv6 服务**，
+> 使下游设备拿不到 IPv6 地址、
+> `ra_preference='medium'`（与 odhcpd 默认等价）与 dnsmasq 五项删除
+> （`nonwildcard` / `boguspriv` 默认 1、`filterwin2k` / `filter_aaaa` / `filter_a`
+> 默认 0，与官方 conffile 完全相同，属空操作）、
 > wan 段的 `leasetime` / `start` / `limit`（`ignore='1'` 下 WAN 侧本就没有 DHCP 服务）。
 > DHCPv6 / RA / dnsmasq 行为完全沿用官方默认。
 

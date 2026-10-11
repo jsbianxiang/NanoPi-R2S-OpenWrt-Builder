@@ -248,8 +248,15 @@ require_uci_section 'network.lan'
 require_uci_section 'dhcp.lan'
 require_uci_section 'dhcp.wan'
 require_uci_section 'dhcp.@dnsmasq[0]'
-# 注意：uci-defaults 按文件名字母序执行，本脚本（99-*）先于 odhcpd.defaults 运行；
-# dhcp.odhcpd 段此时还不存在（由随后的 odhcpd.defaults 创建），不能作为前置条件检查。
+# 时序说明（已对照官方 openwrt-25.12 源码核实）：
+#   - 网络配置由 preinit 钩子 /lib/preinit/82_config_generate 在 uci-defaults
+#     之前生成（含 /etc/board.json 与 network.globals.ula_prefix='auto'）；
+#   - uci-defaults 按文件名 ASCII 字母序执行，odhcpd 包的脚本安装名为
+#     /etc/uci-defaults/15_odhcpd（源文件名才叫 odhcpd.defaults），**先于**
+#     本脚本（99-*）运行，已创建 dhcp.odhcpd 段并写入 dhcp.lan 的
+#     ra/dhcpv6/ra_slaac 等官方默认。
+#   因此 dhcp.odhcpd 在本脚本运行时确实存在；这里仍不把它列为硬性前置条件——
+#   若将来构建时移除 odhcpd，脚本应仍能完成其余网络配置。
 require_uci_section 'firewall.@defaults[0]'
 
 # ---------------------------------------------------------------------------
@@ -312,13 +319,18 @@ log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wa
 
 # ---------------------------------------------------------------------------
 # 6. DHCP / DNS
-# 时序说明：uci-defaults 按文件名字母序执行，本脚本（99-*）先于 odhcpd.defaults。
-# odhcpd.defaults 随后会写入官方默认（dhcp.lan 的 dhcpv6=server / ra=server /
-# ra_slaac=1，以及 dhcp.odhcpd 段 maindhcp=0）；dnsmasq 行为由官方 conffile
-# 决定。官方默认即所需行为，此前版本对等价默认值的「防御性删除/重写」
-# （ra_slaac、dhcpv6、maindhcp、dns_redirect、ra_preference、dnsmasq 五项、
-# wan 段 leasetime/start/limit）在官方 OpenWrt 25.12 上均为空操作，已移除。
-# 仅保留一项：把 WAN 侧 DHCP 服务显式钉死为禁用。
+# 时序说明（已对照官方 openwrt-25.12 源码核实）：uci-defaults 按文件名 ASCII
+# 字母序执行，odhcpd 包的脚本安装名为 15_odhcpd，**先于**本脚本（99-*）运行，
+# 已写入官方默认：dhcp.lan 的 dhcpv4/dhcpv6/ra = server（LAN 为静态地址时）、
+# ra_slaac=1、ra_flags managed-config/other-config，以及 dhcp.odhcpd 段
+# （maindhcp=0）。dnsmasq 行为由官方 conffile 决定。官方默认即所需行为。
+# 因此此前版本对等价默认值的「防御性删除/重写」已移除，其中：
+#   - 删 dhcpv6 尤其有害：odhcpd 内置默认是 MODE_DISABLED，删掉 15_odhcpd 写入的
+#     'server' 会直接关掉 LAN 的 DHCPv6 服务（IPv6 地址下发失效）；
+#   - 删 ra_slaac / maindhcp 属空操作（odhcpd 内置默认 true / false，与官方一致）；
+#   - ra_preference='medium'、dnsmasq 五项删除、dns_redirect 删除、wan 段
+#     leasetime/start/limit 均为空操作或与 ignore='1' 下无意义，已移除。
+# 仅保留一项：把 WAN 侧 DHCP 服务显式钉死为禁用（官方 conffile 本就 ignore=1）。
 # ---------------------------------------------------------------------------
 uci_do set dhcp.wan.ignore='1'
 
