@@ -247,7 +247,8 @@ require_uci_section 'network.lan'
 require_uci_section 'dhcp.lan'
 require_uci_section 'dhcp.wan'
 require_uci_section 'dhcp.@dnsmasq[0]'
-require_uci_section 'dhcp.odhcpd'
+# 注意：uci-defaults 按文件名字母序执行，本脚本（99-*）先于 odhcpd.defaults 运行；
+# dhcp.odhcpd 段此时还不存在（由随后的 odhcpd.defaults 创建），不能作为前置条件检查。
 require_uci_section 'firewall.@defaults[0]'
 
 # ---------------------------------------------------------------------------
@@ -275,7 +276,6 @@ case "$wan_proto" in
         for _opt in ipaddr netmask gateway dns; do
             uci_delete_optional "network.wan.$_opt"
         done
-        uci_do set network.wan.sendclientid='auto'
         ;;
 esac
 
@@ -285,7 +285,6 @@ uci_do set network.wan6.proto='dhcpv6'
 uci_do set network.wan6.reqaddress='try'
 uci_do set network.wan6.reqprefix='auto'
 uci_do set network.wan6.norelease='1'
-uci_do set network.wan6.sendclientid='auto'
 
 # ---------------------------------------------------------------------------
 # 5. LAN 地址与网络全局选项
@@ -318,6 +317,11 @@ log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wa
 
 # ---------------------------------------------------------------------------
 # 6. DHCP / DNS（保留默认服务行为；删除等价默认值）
+# 时序说明：uci-defaults 按文件名字母序执行，本脚本（99-*）先于 odhcpd.defaults。
+# odhcpd.defaults 随后会写入官方默认：dhcp.lan 的 dhcpv6=server/ra=server/
+# ra_slaac=1/ra_flags，以及 dhcp.odhcpd 段（maindhcp=0 等）。因此下面的删除
+# 在本脚本运行时多为空操作（选项尚不存在），保留是为了防御上游默认变化或
+# 配置残留；最终固件行为与官方默认完全一致。
 # ---------------------------------------------------------------------------
 uci_delete_optional 'dhcp.lan.ra_slaac'
 uci_delete_optional 'dhcp.lan.dhcpv6'
@@ -344,10 +348,9 @@ uci_delete_optional 'dhcp.@dnsmasq[0].dns_redirect'
 # ---------------------------------------------------------------------------
 # 7. 防火墙
 # 不修改 zone 的 input/forward/output 策略；WAN 入站继续使用官方默认拒绝策略。
-# 注：下面按注释中的“取消勾选”处理，显式置 0；值 1 才表示启用/勾选。
-# 关闭 SYN-flood 防御会降低对 SYN 洪泛的防护能力，只有明确需要时才保留此设置。
-# FullCone NAT 全局开关关闭，避免启用该 NAT 模式。
-# 流量卸载设为“无”：删除软件/硬件卸载选项。
+# 注：synflood_protect 显式置 1（官方 25.12 默认已是 1，写出以防上游变化）；
+# fullcone 显式置 0（官方默认无此选项，值 1 才表示启用 fullcone NAT）。
+# 流量卸载设为“无”：删除软件/硬件卸载选项，避免与 TPROXY 透明代理类插件冲突。
 # ---------------------------------------------------------------------------
 uci_do set firewall.@defaults[0].synflood_protect='1'
 uci_do set firewall.@defaults[0].fullcone='0'

@@ -138,12 +138,13 @@ GMAC，由内核直接支持。
 | 网络 | 删除 `network.globals.ula_prefix` | 去掉自动生成的 ULA 前缀，避免 LAN 双前缀 |
 | 网络 | `packet_steering='1'` | 数据包引导显式开启（与「未设」等价，写出来便于 `uci show` 比对） |
 | 网络 | `lan/wan/wan6` 的 `multipath='off'` | 防御性显式默认值（全局 MPTCP 未启用时不生效） |
-| DHCP | 删除 `dhcp.lan.ra_slaac` / `dhcp.lan.dhcpv6` | 均等于 odhcpd 默认值（`ra_slaac=true`、`dhcpv6=disabled`），删除后行为不变 |
+| DHCP | 删除 `dhcp.lan.ra_slaac` / `dhcp.lan.dhcpv6` | 防御性空操作：uci-defaults 按字母序执行，本脚本（`99-*`）先于 `odhcpd.defaults` 运行，这两项此刻尚不存在；随后 `odhcpd.defaults` 写入官方默认（`dhcpv6=server`、`ra=server`、`ra_slaac=1`），最终行为与官方完全一致 |
 | DHCP | `dhcp.lan.ra_preference='medium'` | 等于 odhcpd 默认值 |
-| DHCP | `dhcp.wan.ignore='1'` | **显式禁用 WAN 侧 DHCP 服务**（防保留配置中 ignore 意外为 0）；`leasetime`/`start`/`limit` 三项仅保留配置呈现 |
-| DHCP | 删除 `dnsmasq` 的 `nonwildcard` / `boguspriv` / `filterwin2k` / `filter_aaaa` / `filter_a` 与 `odhcpd.maindhcp` | 每一项都等于其默认值 |
+| DHCP | `dhcp.wan.ignore='1'` | **显式禁用 WAN 侧 DHCP 服务**（与官方默认一致；`leasetime`/`start`/`limit` 三项仅保留配置呈现） |
+| DHCP | 删除 `dnsmasq` 的 `nonwildcard` / `boguspriv` / `filterwin2k` / `filter_aaaa` / `filter_a` | 均等于官方 `/etc/config/dhcp`（dnsmasq conffile）中的默认值 |
+| DHCP | 删除 `odhcpd.maindhcp` | 防御性空操作：`dhcp.odhcpd` 段此刻尚不存在（由随后的 `odhcpd.defaults` 创建，`maindhcp=0`），最终与官方一致 |
 | DHCP | 删除 `dnsmasq.dns_redirect` | 官方 OpenWrt **无此选项**，删除为空操作；仅当把配置带到 ImmortalWrt 等衍生发行版时才有意义（关闭 DNS 劫持） |
-| 防火墙 | `synflood_protect='1'` | **显式开启** SYN-flood 防护（SYN cookies + WAN 侧新连接限速），不再依赖出厂写法 |
+| 防火墙 | `synflood_protect='1'` | 显式开启 SYN-flood 防护（官方 25.12 默认已是 1，写出以防上游变化） |
 | 防火墙 | `fullcone='0'` | **显式关闭** IPv4 fullcone NAT（本机 WAN 处于双 NAT，上游 symmetric NAT 会抵消 fullcone 收益） |
 | 防火墙 | 删除 `flow_offloading` / `flow_offloading_hw` | **关闭流量卸载**。flow offload 会让首包之后的流量走 fast path 绕过 netfilter 钩子，与 TPROXY 透明代理类插件冲突 |
 
@@ -246,22 +247,24 @@ LICENSE                                   # 许可证
 
 - 固件**不提供** `/etc/config/firewall`（完全继承 `firewall4` 包的默认配置）；
 - `99-custom.sh` **不修改任何区域（zone）与通信规则的策略**，只做三项全局设置：
-  ① `synflood_protect='1'`（显式开启 SYN-flood 防护）；
+  ① `synflood_protect='1'`（官方默认已是 1，显式写出以防上游变化）；
   ② `fullcone='0'`（显式关闭 IPv4 fullcone，双 NAT 下无收益）；
   ③ 关闭流量卸载（删除 `flow_offloading` / `flow_offloading_hw`），
      避免与透明代理类插件的 TPROXY 冲突。
 
 官方 `firewall4` 默认配置的关键部分
-（`firewall4` 上游 `root/etc/config/firewall`，OpenWrt 25.12 即此版本）：
+（`package/network/config/firewall/files/firewall.config`，OpenWrt 25.12.5 实测原文）：
 
 ```text
 config defaults
+	option synflood_protect	1
 	option input		REJECT
 	option output		ACCEPT
 	option forward		REJECT
 
 config zone
 	option name		lan
+	list   network		'lan'
 	option input		ACCEPT
 	option output		ACCEPT
 	option forward		ACCEPT
@@ -272,8 +275,9 @@ config zone
 	list   network		'wan6'
 	option input		REJECT
 	option output		ACCEPT
-	option forward		DROP
+	option forward		REJECT
 	option masq		1
+	option mtu_fix		1
 ```
 
 即 **WAN 入站默认「拒绝」**，不允许从 WAN 侧访问路由器后台。
