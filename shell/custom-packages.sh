@@ -52,10 +52,15 @@
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 
 # -----------------------------------------------------------------------------
-# 1.2 其他第三方插件（可选；⚠ 代理类互斥，只能选一个）
+# 1.2 其他第三方插件（可选；⚠⚠ 代理类互斥，与 Clashoo 只能二选一）
 # -----------------------------------------------------------------------------
 # 下面每行的包都已逐一校验存在于 dllkids 第三方源，取消注释即启用。
 # 第三方应用是中文原生，没有独立语言包，故都不带 luci-i18n-*-zh-cn。
+#
+# ⚠⚠⚠ 启用下面任何一行之前，必须先把上面已启用的 Clashoo 行注释掉！
+#   两套代理插件会同时接管防火墙规则与 DNS：轻则规则打架、LuCI 配置错乱、
+#   DNS 劫持冲突，重则 make image 直接失败或刷机后断网。
+#   更换方式 = 先停旧的，再开新的，任何时候都不要双开。
 #
 # SSR-Plus —— mihomo 内核由 rockchip/build.sh 自动补进 PACKAGES，这里不用写
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-ssr-plus xray-core naiveproxy kmod-nft-tproxy kmod-nft-socket"
@@ -105,9 +110,11 @@ unset _app
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-battstatus luci-i18n-battstatus-zh-cn"
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-dashboard luci-i18n-dashboard-zh-cn"
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-dsl luci-i18n-dsl-zh-cn"
-# 代理（⚠ 与 Clashoo 互斥，只能选一个；app 本体在「三」B 组，
-#       用 THIRD_PARTY_APPS="passwall" 启用；下面只补依赖与内核）
+# 代理（⚠⚠ 与 Clashoo 互斥：启用 passwall 前必须先注释掉「一」的 Clashoo 行）
+#       app 本体在「三」B 组，用 THIRD_PARTY_APPS="passwall" 启用；下面只补依赖与内核
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview xray-core sing-box hysteria"
+# OpenClash（⚠⚠ 与 Clashoo 互斥：启用前必须先注释掉 Clashoo 行；
+#             meta 内核与 GeoIP/GeoSite 由 rockchip/build.sh 自动下载）
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-openclash luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy bash curl ip-full unzip"
 
 # =============================================================================
@@ -155,7 +162,9 @@ unset _app
 # -----------------------------------------------------------------------------
 # B 组：仅第三方源 dllkids 提供（填进 2.2 的 THIRD_PARTY_APPS，不带 i18n 包）
 # -----------------------------------------------------------------------------
-# --- 代理 / VPN / DNS 分流 ---
+# --- 代理 / VPN（⚠⚠ homeproxy / passwall / dae 与 Clashoo 互斥，见注意事项 2：
+#     启用前必须先注释掉「一」的 Clashoo 行；microsocks / softethervpn /
+#     ipsec-vpnd / gost 是代理服务器类，与 Clashoo 不冲突）---
 #   homeproxy                 passwall                  dae                       microsocks                softethervpn
 #   ipsec-vpnd                gost
 #

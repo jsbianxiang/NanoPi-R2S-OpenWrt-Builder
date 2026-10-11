@@ -100,6 +100,15 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
   LAN 地址为工作流中填写的 `custom_router_ip`。对应关系见下节。
 - **默认主题：Bootstrap**（OpenWrt 官方默认；如安装了 Argon 主题，
   可在 LuCI「系统 → 系统 → 语言和界面」里切换）。
+- **中国大陆优化**（官方默认面向全球，本项目做了以下本土化调整）：
+  - **中文界面**：`luci-i18n-base-zh-cn` 预装（浏览器语言为中文时 LuCI 直接显示简体）；
+  - **时区**：`Asia/Shanghai`（CST-8，官方默认 UTC）；
+  - **NTP**：改为国内源（阿里 `ntp.aliyun.com` / `ntp1.aliyun.com`、
+    腾讯 `time1.cloud.tencent.com`、`cn.pool.ntp.org`），替换官方 openwrt 池；
+  - **BBR TCP 拥塞控制**：预装 `kmod-tcp-bbr` 并写入
+    `/etc/sysctl.d/99-bbr.conf`（`net.ipv4.tcp_congestion_control=bbr`），
+    上游拥塞算法由默认 cubic 改为 BBR，可缓解跨境/跨运营商链路吞吐抖动；
+    验证方式：`sysctl net.ipv4.tcp_congestion_control`。
 - **网络 / DHCP / 防火墙的调优**由 `99-custom.sh` 在首启写入，
   逐项说明见下文「首启初始化（`99-custom.sh`）」。
 - **网页终端 / SSH 只监听局域网**：`ttyd` 监听 `br-lan`、`dropbear` 监听 LAN 地址，
@@ -137,16 +146,22 @@ GMAC，由内核直接支持。
 | 网络 | LAN IPv6 规划 | `delegate='0'` + `ip6assign='64'` + `ip6ifaceid='eui64'` |
 | 网络 | 删除 `network.globals.ula_prefix` | 去掉自动生成的 ULA 前缀，避免 LAN 双前缀 |
 | 网络 | `packet_steering='1'` | 数据包引导显式开启（与「未设」等价，写出来便于 `uci show` 比对） |
-| 网络 | `lan/wan/wan6` 的 `multipath='off'` | 防御性显式默认值（全局 MPTCP 未启用时不生效） |
-| DHCP | 删除 `dhcp.lan.ra_slaac` / `dhcp.lan.dhcpv6` | 防御性空操作：uci-defaults 按字母序执行，本脚本（`99-*`）先于 `odhcpd.defaults` 运行，这两项此刻尚不存在；随后 `odhcpd.defaults` 写入官方默认（`dhcpv6=server`、`ra=server`、`ra_slaac=1`），最终行为与官方完全一致 |
-| DHCP | `dhcp.lan.ra_preference='medium'` | 等于 odhcpd 默认值 |
-| DHCP | `dhcp.wan.ignore='1'` | **显式禁用 WAN 侧 DHCP 服务**（与官方默认一致；`leasetime`/`start`/`limit` 三项仅保留配置呈现） |
-| DHCP | 删除 `dnsmasq` 的 `nonwildcard` / `boguspriv` / `filterwin2k` / `filter_aaaa` / `filter_a` | 均等于官方 `/etc/config/dhcp`（dnsmasq conffile）中的默认值 |
-| DHCP | 删除 `odhcpd.maindhcp` | 防御性空操作：`dhcp.odhcpd` 段此刻尚不存在（由随后的 `odhcpd.defaults` 创建，`maindhcp=0`），最终与官方一致 |
-| DHCP | 删除 `dnsmasq.dns_redirect` | 官方 OpenWrt **无此选项**，删除为空操作；仅当把配置带到 ImmortalWrt 等衍生发行版时才有意义（关闭 DNS 劫持） |
+| DHCP | `dhcp.wan.ignore='1'` | 显式禁用 WAN 侧 DHCP 服务（与官方默认一致，显式写出以防上游变化） |
 | 防火墙 | `synflood_protect='1'` | 显式开启 SYN-flood 防护（官方 25.12 默认已是 1，写出以防上游变化） |
-| 防火墙 | `fullcone='0'` | **显式关闭** IPv4 fullcone NAT（本机 WAN 处于双 NAT，上游 symmetric NAT 会抵消 fullcone 收益） |
-| 防火墙 | 删除 `flow_offloading` / `flow_offloading_hw` | **关闭流量卸载**。flow offload 会让首包之后的流量走 fast path 绕过 netfilter 钩子，与 TPROXY 透明代理类插件冲突 |
+| 大陆优化 | 时区 `Asia/Shanghai`（CST-8） | 官方默认 UTC，改为北京时间 |
+| 大陆优化 | NTP 改用国内服务器 | 阿里 `ntp.aliyun.com` / `ntp1.aliyun.com`、腾讯 `time1.cloud.tencent.com`、`cn.pool.ntp.org`，替换官方 openwrt 池 |
+
+> **BBR 拥塞控制**不在首启脚本里：`kmod-tcp-bbr` 与 `/etc/sysctl.d/99-bbr.conf`
+> 由 `rockchip/build.sh` 在**构建期**写入固件（sysctl 初始化顺序在内核模块加载之后，无需首启干预）。
+
+> **已移除的无效项**（此前版本存在，经与官方 v25.12.5 源码核对后清理）：
+> `multipath='off'`（官方 netifd 无此选项，MPTCP 属 ImmortalWrt 补丁）、
+> `fullcone='0'`（官方 firewall4 无此选项）、`dns_redirect` 删除（官方无此选项）、
+> `ra_slaac` / `dhcpv6` / `odhcpd.maindhcp` 的防御性删除（uci-defaults 按字母序执行，
+> 这些项在本脚本运行时尚不存在，随后由 `odhcpd.defaults` 写入官方默认）、
+> `ra_preference='medium'` 与 dnsmasq 五项删除（均与官方默认值等价，属空操作）、
+> wan 段的 `leasetime` / `start` / `limit`（`ignore='1'` 下 WAN 侧本就没有 DHCP 服务）。
+> DHCPv6 / RA / dnsmasq 行为完全沿用官方默认。
 
 > **有意不写入的**：`ttyd` / `dropbear` 的监听范围。两个服务保持上游默认、只监听局域网。
 > 详见「WAN 入站防火墙」一节。
@@ -246,11 +261,12 @@ LICENSE                                   # 许可证
 本项目采用 **OpenWrt 官方默认防火墙策略**：
 
 - 固件**不提供** `/etc/config/firewall`（完全继承 `firewall4` 包的默认配置）；
-- `99-custom.sh` **不修改任何区域（zone）与通信规则的策略**，只做三项全局设置：
-  ① `synflood_protect='1'`（官方默认已是 1，显式写出以防上游变化）；
-  ② `fullcone='0'`（显式关闭 IPv4 fullcone，双 NAT 下无收益）；
-  ③ 关闭流量卸载（删除 `flow_offloading` / `flow_offloading_hw`），
-     避免与透明代理类插件的 TPROXY 冲突。
+- `99-custom.sh` **不修改任何区域（zone）与通信规则的策略**，只做一项全局设置：
+  `synflood_protect='1'`（官方默认已是 1，显式写出以防上游变化）。
+  流量卸载（`flow_offloading` / `flow_offloading_hw`）官方默认即关闭，不做改动；
+  官方 firewall4 没有 fullcone 选项，此前版本的 `fullcone='0'` 已移除。
+  注意：日后若启用 passwall 等 TPROXY 透明代理插件，请**不要**在 LuCI 里开启
+  流量卸载——flow offload 会让首包之后的流量走 fast path 绕过 netfilter 钩子。
 
 官方 `firewall4` 默认配置的关键部分
 （`package/network/config/firewall/files/firewall.config`，OpenWrt 25.12.5 实测原文）：

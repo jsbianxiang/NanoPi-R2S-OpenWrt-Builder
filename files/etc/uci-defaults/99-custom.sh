@@ -8,7 +8,8 @@
 #   eth0：板载 GMAC -> WAN
 #   eth1：USB RTL8153 -> LAN；br-lan 及其端口由 config_generate 创建
 #
-# 职责：WAN/WAN6、LAN 管理地址、网络选项、DHCP/DNS、防火墙选项。
+# 职责：WAN/WAN6、LAN 管理地址、网络选项、DHCP、防火墙选项，
+#       以及中国大陆优化（时区 / 国内 NTP）。
 # 不放开 WAN 入站，不改写固件品牌，不注入第三方插件补丁。
 #
 # 执行约定：这是 uci-defaults 脚本，不应作为普通运行脚本单独执行。
@@ -307,58 +308,50 @@ fi
 uci_delete_optional 'network.globals.ula_prefix'
 uci_do set network.globals.packet_steering='1'
 
-# 保留旧设备的 uci show 形态；当前未启用全局 multipath，接口值不启用多路径。
-# 'off' 是旧配置记法；如项目决定统一现代 LuCI 形态，可另行评估改为空字符串。
-uci_do set 'network.lan.multipath=off'
-uci_do set 'network.wan.multipath=off'
-uci_do set 'network.wan6.multipath=off'
-
 log "iface map: lan=$(uci -q get network.lan.device) wan=$(uci -q get network.wan.device) wan6=$(uci -q get network.wan6.device)"
 
 # ---------------------------------------------------------------------------
-# 6. DHCP / DNS（保留默认服务行为；删除等价默认值）
+# 6. DHCP / DNS
 # 时序说明：uci-defaults 按文件名字母序执行，本脚本（99-*）先于 odhcpd.defaults。
-# odhcpd.defaults 随后会写入官方默认：dhcp.lan 的 dhcpv6=server/ra=server/
-# ra_slaac=1/ra_flags，以及 dhcp.odhcpd 段（maindhcp=0 等）。因此下面的删除
-# 在本脚本运行时多为空操作（选项尚不存在），保留是为了防御上游默认变化或
-# 配置残留；最终固件行为与官方默认完全一致。
+# odhcpd.defaults 随后会写入官方默认（dhcp.lan 的 dhcpv6=server / ra=server /
+# ra_slaac=1，以及 dhcp.odhcpd 段 maindhcp=0）；dnsmasq 行为由官方 conffile
+# 决定。官方默认即所需行为，此前版本对等价默认值的「防御性删除/重写」
+# （ra_slaac、dhcpv6、maindhcp、dns_redirect、ra_preference、dnsmasq 五项、
+# wan 段 leasetime/start/limit）在官方 OpenWrt 25.12 上均为空操作，已移除。
+# 仅保留一项：把 WAN 侧 DHCP 服务显式钉死为禁用。
 # ---------------------------------------------------------------------------
-uci_delete_optional 'dhcp.lan.ra_slaac'
-uci_delete_optional 'dhcp.lan.dhcpv6'
-uci_do set dhcp.lan.ra_preference='medium'
-
-# 明确禁用 WAN 侧 DHCP 服务，防止保留配置中 ignore 意外为 0。
 uci_do set dhcp.wan.ignore='1'
-# 以下三项只保留既有配置呈现；ignore=1 时不启用 WAN 侧 DHCP 服务。
-uci_do set dhcp.wan.leasetime='12h'
-uci_do set dhcp.wan.start='100'
-uci_do set dhcp.wan.limit='150'
-
-uci_delete_optional 'dhcp.@dnsmasq[0].nonwildcard'
-uci_delete_optional 'dhcp.@dnsmasq[0].boguspriv'
-uci_delete_optional 'dhcp.@dnsmasq[0].filterwin2k'
-uci_delete_optional 'dhcp.@dnsmasq[0].filter_aaaa'
-uci_delete_optional 'dhcp.@dnsmasq[0].filter_a'
-uci_delete_optional 'dhcp.odhcpd.maindhcp'
-
-# 部分衍生发行版（如 ImmortalWrt）的 dns_redirect 会重定向过路 UDP/53，
-# 与接管 DNS 的代理插件冲突；官方 OpenWrt 无此选项，此删除为空操作。
-uci_delete_optional 'dhcp.@dnsmasq[0].dns_redirect'
 
 # ---------------------------------------------------------------------------
 # 7. 防火墙
 # 不修改 zone 的 input/forward/output 策略；WAN 入站继续使用官方默认拒绝策略。
-# 注：synflood_protect 显式置 1（官方 25.12 默认已是 1，写出以防上游变化）；
-# fullcone 显式置 0（官方默认无此选项，值 1 才表示启用 fullcone NAT）。
-# 流量卸载设为“无”：删除软件/硬件卸载选项，避免与 TPROXY 透明代理类插件冲突。
+# 注：synflood_protect 显式置 1（官方 25.12 默认已是 1，写出以防上游变化）。
+# 流量卸载（flow_offloading / flow_offloading_hw）官方默认即关闭，不再触碰——
+# 默认固件没有 TPROXY 透明代理插件，无冲突场景；日后若启用 passwall 等
+# TPROXY 插件，也请勿在 LuCI 开启流量卸载（fast path 会绕过 netfilter 钩子）。
+# 此前版本的 fullcone='0' 已移除：官方 firewall4 无此选项（ImmortalWrt 补丁），
+# 写入只会在配置里留下无人识别的死选项。
 # ---------------------------------------------------------------------------
 uci_do set firewall.@defaults[0].synflood_protect='1'
-uci_do set firewall.@defaults[0].fullcone='0'
-uci_delete_optional 'firewall.@defaults[0].flow_offloading'
-uci_delete_optional 'firewall.@defaults[0].flow_offloading_hw'
 
 # ---------------------------------------------------------------------------
-# 8. 可选设置（默认不执行）
+# 8. 中国大陆优化：时区与 NTP
+# 官方默认 UTC + 4 个 openwrt.pool.ntp.org（国内解析慢、可达性一般）。
+# 改为北京时间（POSIX TZ 记法 CST-8）与国内 NTP 服务器。
+# ---------------------------------------------------------------------------
+require_uci_section 'system.@system[0]'
+uci_do set system.@system[0].timezone='CST-8'
+uci_do set system.@system[0].zonename='Asia/Shanghai'
+
+require_uci_section 'system.ntp'
+uci_delete_optional 'system.ntp.server'
+for _ntp in ntp.aliyun.com ntp1.aliyun.com time1.cloud.tencent.com cn.pool.ntp.org; do
+    uci_do add_list "system.ntp.server=$_ntp"
+done
+unset _ntp
+
+# ---------------------------------------------------------------------------
+# 9. 可选设置（默认不执行）
 # 如需默认使用 Bootstrap，取消下一行注释；无需手动 uci commit。
 # uci_do set luci.main.mediaurlbase='/luci-static/bootstrap'
 #
