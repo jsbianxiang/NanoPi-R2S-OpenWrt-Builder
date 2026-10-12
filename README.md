@@ -55,6 +55,7 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
 | 工作流文件 | 名称 | 包管理 | 说明 |
 | --- | --- | --- | --- |
 | `.github/workflows/build-rockchip-openwrt-25.12.x.yml` | Build R2S OpenWrt 25.12.x | apk | 构建固件，默认 `25.12.5`；产物同时写入**滚动 Release**（tag `Autobuild`，永远只有一条）和 **Artifact 归档**（`r2s-openwrt-<版本>-r<序号>`，保留 90 天） |
+| `.github/workflows/verify-official-parity.yml` | Verify official-package parity | apk | 维护用：**只读**核对。用 `make manifest` 导出本项目的包列表，与官方 `openwrt-<版本>-rockchip-armv8.manifest` + 本机型 `device_packages` 做 `comm` 比对，出现缺口即 fail（不构建镜像、不发布任何产物） |
 | `.github/workflows/clean-workflow.yml` | Cleanup Old Workflow Runs | — | 维护用：手动清理旧的 Actions 运行记录（默认只保留最近 1 天）。⚠️ **删运行记录会连带删掉那次的 Artifact**，想留档请先下载，或把 `keep_days` 调大 |
 
 ### 工作流输入项
@@ -437,6 +438,13 @@ BUILD_OFFICIAL_ONLY=1 bash rockchip/build.sh
 
 会同时跳过 B 增量与 C 第三方包，产出「纯官方」包集合。
 
+**不想本地跑构建？** 直接用 Actions 里的
+`Verify official-package parity` 工作流（`workflow_dispatch`）：
+它从 `build.sh` 里 `sed` 出 `OFFICIAL_BASELINE` 当唯一事实来源，
+在 `openwrt/imagebuilder:rockchip-armv8-<版本>` 容器里跑 `make manifest`（**不打镜像**，
+只列出会被装进去的包），再拉官方 manifest + `profiles.json` 做差集，
+缺口非空就 `exit 1`，结果同时写进该次运行的 Summary。全程只读、不发布产物。
+
 #### B / C 层的可选项
 
 - **OpenWrt 官方源的软件**：把要装的**短名**填进 `shell/custom-packages.sh` 的
@@ -471,11 +479,13 @@ BUILD_OFFICIAL_ONLY=1 bash rockchip/build.sh
 ```
 .github/workflows/
   build-rockchip-openwrt-25.12.x.yml      # R2S 固件构建工作流
+  verify-official-parity.yml              # 维护用：核对官方包对齐（只读）
   clean-workflow.yml                      # 维护用：清理旧 Actions 运行记录
 files/etc/uci-defaults/
   99-custom.sh                            # 首次启动初始化脚本（R2S 专用，网口映射硬编码）
 rockchip/
   build.sh                                # 构建脚本 + dllkids 第三方源注入
+  verify-parity.sh                        # 容器内脚本：make manifest 导出包列表（被上面的工作流调用）
 shell/
   custom-packages.sh                      # 可选软件包开关（第三方插件默认 Clashoo）
 README.md                                 # 本文件

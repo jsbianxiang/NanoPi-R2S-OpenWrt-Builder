@@ -1,0 +1,139 @@
+name: Verify official-package parity
+
+# 只读校验（不发布任何产物）：
+#   用「官方基线」（rockchip/build.sh 的 OFFICIAL_BASELINE）在官方 Image Builder
+#   里生成 manifest，再与官方 release 的 manifest 逐包比对，确认我们**没有漏装**
+#   官方镜像里的任何一个包。
+#
+# 判据：expected（官方 manifest + 本机型 device_packages）− ours == 空集。
+#   官方 manifest 是 target 级、不含设备 kmod（CONFIG_TARGET_MULTI_PROFILE=y），
+#   所以要把 profiles.json 里该机型的 device_packages 补进去才是官方实机镜像。
+#   ours 里多出来的（设备包及其依赖）属预期，只作提示，不算失败。
+#
+# ⚠ 固件选择器网页上那个 "Installed Packages" 框不是对齐目标：它只列 32 项
+#   （默认包 + 设备包 + luci + luci-app-attendedsysupgrade），官方镜像实际有 128 个。
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_version:
+        description: "要核对的 OpenWrt 版本"
+        required: true
+        default: "25.12.5"
+        type: choice
+        options:
+          - 25.12.0
+          - 25.12.1
+          - 25.12.2
+          - 25.12.3
+          - 25.12.4
+          - 25.12.5
+
+permissions:
+  contents: read
+
+env:
+  PROFILE: "friendlyarm_nanopi-r2s"
+  TARGET_DIR: "rockchip/armv8"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # 基线包列表以 build.sh 为唯一真源，避免在 workflow 里再维护一份而漂移
+      - name: Extract OFFICIAL_BASELINE from build.sh
+        id: baseline
+        run: |
+          B="$(sed -n 's/^OFFICIAL_BASELINE="\(.*\)"$/\1/p' rockchip/build.sh)"
+          if [ -z "$B" ]; then
+            echo "::error::未能从 rockchip/build.sh 提取 OFFICIAL_BASELINE"
+            exit 1
+          fi
+          echo "baseline=$B" >> "$GITHUB_OUTPUT"
+          echo "官方基线 = $B"
+
+      - name: Set executable permissions
+        run: chmod +x "${{ github.workspace }}/rockchip/verify-parity.sh"
+
+      # 与构建工作流用同一个官方 Image Builder 镜像，保证默认包/设备包一致
+      - name: Generate our manifest (official baseline only)
+        run: |
+          mkdir -p "${{ github.workspace }}/out"
+          docker run --rm -i \
+              --user root \
+              -v "${{ github.workspace }}/rockchip/verify-parity.sh:/builder/verify-parity.sh" \
+              -v "${{ github.workspace }}/out:/builder/out" \
+              -e PROFILE="$PROFILE" \
+              -e BASELINE="${{ steps.baseline.outputs.baseline }}" \
+          openwrt/imagebuilder:rockchip-armv8-${{ inputs.openwrt_version }} \
+              /bin/bash /builder/verify-parity.sh
+
+      - name: Fetch official manifest and profiles.json
+        run: |
+          V="${{ inputs.openwrt_version }}"
+          BASE="https://downloads.openwrt.org/releases/$V/targets/$TARGET_DIR"
+          curl -fsSL -o official.manifest "$BASE/openwrt-$V-rockchip-armv8.manifest"
+          curl -fsSL -o profiles.json      "$BASE/profiles.json"
+          echo "官方 manifest 行数: $(wc -l < official.manifest)"
+          echo "官方 manifest 前 3 行:"; sed -n '1,3p' official.manifest
+
+      - name: Compare
+        run: |
+          set -euo pipefail
+
+          # 官方 manifest 是 target 级、不含设备包 ⇒ 补上本机型 device_packages
+          jq -r --arg p "$PROFILE" '.profiles[$p].device_packages[]' profiles.json > device.names
+
+          sed -n 's/^\([^ ][^ ]*\) - .*/\1/p' official.manifest | sort -u > official.names
+          # 容器是 Alpine，busybox sort 的排序规则与 GNU sort 不同 ⇒ 在宿主机重新排序
+          sort -u out/ours.manifest > ours.names
+
+          cat official.names device.names | sort -u > expected.names
+
+          comm -23 expected.names ours.names > missing.names
+          comm -13 expected.names ours.names > extra.names
+
+          {
+            echo "## 官方包对齐核对 — OpenWrt ${{ inputs.openwrt_version }}"
+            echo
+            echo "| 集合 | 包数 |"
+            echo "| --- | --- |"
+            echo "| 官方 manifest（target 级） | $(wc -l < official.names) |"
+            echo "| + 本机型 device_packages | $(wc -l < device.names) |"
+            echo "| = expected | $(wc -l < expected.names) |"
+            echo "| 官方基线产出的 manifest | $(wc -l < ours.names) |"
+            echo
+            echo "官方基线：\`${{ steps.baseline.outputs.baseline }}\`"
+            echo
+            echo "### 缺口 — 官方有、我们没有（必须为空）"
+            echo
+            if [ -s missing.names ]; then
+              echo '```'
+              cat missing.names
+              echo '```'
+            else
+              echo "无 ✅"
+            fi
+            echo
+            echo "### 多出 — 我们有、官方没有（设备包及其依赖，属预期）"
+            echo
+            echo '```'
+            cat extra.names
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "==== expected - ours ===="
+          if [ -s missing.names ]; then
+            cat missing.names
+            echo "::error::官方基线存在缺口：$(wc -l < missing.names) 个官方包未被覆盖"
+            exit 1
+          fi
+          echo "（空）"
+          echo "==== ours - expected ===="
+          cat extra.names
+
+          echo "✅ 官方 manifest + 设备包里的每一个包都能被官方基线覆盖"
