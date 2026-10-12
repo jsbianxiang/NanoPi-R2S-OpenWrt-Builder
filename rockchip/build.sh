@@ -90,11 +90,29 @@ PACKAGES=""
 # `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上（见下方中文包一节，
 #   它与 luci-i18n-attendedsysupgrade-zh-cn 一起列出）。
 # ✔ 已核对官方 25.12.5 rockchip/armv8 manifest（openwrt-25.12.5-rockchip-armv8.manifest，
-#   共 128 包）：官方固件 = IB 默认包 + `luci` + `luci-app-attendedsysupgrade`，
-#   其余 luci-light/luci-ssl/uhttpd/rpcd-mod-* 均为这两个元包的自动依赖。
-#   ⇒ 官方 Installed Packages 基线 = `luci`（下一行）+ `luci-app-attendedsysupgrade`
-#     （见下方中文包一节），基线之外的行都是本项目的增量。
+#   共 128 包）：官方固件 = IB 默认包 + 设备包 + `luci` + `luci-ssl`
+#   + `luci-app-attendedsysupgrade`。
+#   - `luci-light` / `uhttpd` / `uhttpd-mod-ubus` / `luci-app-firewall` /
+#     `luci-app-package-manager` / `luci-theme-bootstrap` / `rpcd-mod-luci` 等
+#     确实都是元包的自动依赖，不必显式写。
+#   - ⚠ 但 **`luci-ssl` 不是自动依赖**（早先这里写错了，已更正）：
+#     官方 config.buildinfo 里是 `CONFIG_PACKAGE_luci-ssl=y` **显式选中**的；
+#     luci feed 源码中 `luci` 集合只依赖 `luci-light + luci-app-package-manager`
+#     （collections/luci/Makefile:14-16），`luci-ssl` 是**另一个独立集合**
+#     （collections/luci-ssl/Makefile:13-16），而且全树没有任何包依赖它
+#     （只有 luci-nginx 提供虚拟名 luci-ssl-nginx）。
+#   - 不加 `luci-ssl` 的后果：它本身是纯元包（目录里只有 Makefile，无任何文件），
+#     唯一实际作用是拉入 `px5g-mbedtls`。而 uhttpd 的启动脚本只在
+#     /usr/sbin/px5g 或 /usr/bin/openssl 存在时才自动生成自签证书
+#     （uhttpd.init:9,55-57,199-201 的 generate_keys）；官方镜像里**没有 openssl**
+#     （只有 mbedtls 系）⇒ 缺 px5g 就不会生成 /etc/uhttpd.crt，443 起不来，
+#     LuCI 只能走 HTTP，与官方不一致。
+#   - 加了之后行为与官方一致：80/443 同时监听，首次启动自动生成自签证书；
+#     `option redirect_https` 官方默认 0，**不做**强制 HTTP→HTTPS 跳转。
+#   ⇒ 官方 Installed Packages 基线 = `luci`（下一行）+ `luci-ssl`（再下一行）
+#     + 中文包一节里的 `luci-app-attendedsysupgrade`，基线之外的行都是本项目的增量。
 PACKAGES="$PACKAGES luci"
+PACKAGES="$PACKAGES luci-ssl"
 PACKAGES="$PACKAGES curl"
 PACKAGES="$PACKAGES bind-tools"
 PACKAGES="$PACKAGES ca-certificates"

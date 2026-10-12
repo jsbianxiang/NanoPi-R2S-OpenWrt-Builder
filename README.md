@@ -115,9 +115,9 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
   luci-mod-admin-full + Bootstrap）。⚠ 官方 IB 默认包**不含** LuCI/uhttpd
   （ImmortalWrt 的 IB 默认带，官方不带）——只装 `luci-i18n-*` / `luci-app-*`
   会拉进 luci-base 但没有 web 服务器，设备上 `/etc/init.d/uhttpd` 都不存在。
-- ⚠ **HTTPS：与官方固件存在差异（尚未补齐）**。官方 25.12.5 的构建配置里有
-  `CONFIG_PACKAGE_luci-ssl=y`（见 `config.buildinfo`），所以官方固件自带
-  uhttpd 自签证书并启用 HTTPS。而 `luci` 集合包本身只等于
+- **HTTPS：已与官方对齐**（`PACKAGES` 里显式写了 `luci-ssl`）。
+  官方 25.12.5 的构建配置里有 `CONFIG_PACKAGE_luci-ssl=y`（见 `config.buildinfo`），
+  所以官方固件自带 uhttpd 自签证书并启用 HTTPS。而 `luci` 集合包本身只等于
   `luci-light + luci-app-package-manager`，**不含** `luci-ssl`：
 
   ```make
@@ -125,11 +125,17 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
   LUCI_DEPENDS:= +luci-light +luci-app-package-manager
   ```
 
-  本仓库 `PACKAGES` 只写了 `luci`，因此**本固件 LuCI 只有 HTTP**。
-  （uhttpd 的出厂 conffile 虽带 `list listen_https 0.0.0.0:443` 与
-  `option cert /etc/uhttpd.crt`，但缺证书文件，uhttpd 会跳过 TLS 监听。）
-  要补齐就在 `rockchip/build.sh` 的 `PACKAGES` 里加一行 `luci-ssl`
-  —— 它会带上 `px5g-mbedtls`，首启自动生成自签证书。
+  并且**全树没有任何包依赖 `luci-ssl`**（它是另一个独立的 collection，
+  见 `collections/luci-ssl/Makefile`）⇒ 只写 `luci` **不会**把它带出来，
+  必须显式写。
+
+  `luci-ssl` 自身是纯元包（目录里只有 `Makefile`，无任何文件），唯一实际作用是
+  拉入 `px5g-mbedtls`：uhttpd 的启动脚本只在 `/usr/sbin/px5g` 或
+  `/usr/bin/openssl` 存在时才自动生成自签证书（`uhttpd.init` 的 `generate_keys`，
+  第 55-57 行），而官方镜像里**没有 openssl**（只有 mbedtls 系）
+  ⇒ 缺 `px5g` 就不会生成 `/etc/uhttpd.crt`，443 端口起不来，LuCI 只剩 HTTP。
+  补齐后与官方一致：**80 与 443 同时监听**，首次启动自动生成自签证书；
+  `option redirect_https` 官方默认 `0`，**不做**强制 HTTP→HTTPS 跳转。
 - **LuCI 界面语言**：`luci.main.lang` 出厂为 `auto`（跟随浏览器语言），
   不是固定中文；中文浏览器会显示简体，要强制可写 `uci set luci.main.lang='zh_cn'`。
 - **中国大陆优化**（官方默认面向全球，本项目做了以下本土化调整）：
