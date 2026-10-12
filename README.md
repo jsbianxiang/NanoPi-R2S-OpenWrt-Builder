@@ -54,8 +54,8 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
 
 | 工作流文件 | 名称 | 包管理 | 说明 |
 | --- | --- | --- | --- |
-| `.github/workflows/build-rockchip-openwrt-25.12.x.yml` | Build R2S OpenWrt 25.12.x | apk | 构建固件，默认 `25.12.5` |
-| `.github/workflows/clean-workflow.yml` | Cleanup Old Workflow Runs | — | 维护用：手动清理旧的 Actions 运行记录（默认只保留最近 1 天） |
+| `.github/workflows/build-rockchip-openwrt-25.12.x.yml` | Build R2S OpenWrt 25.12.x | apk | 构建固件，默认 `25.12.5`；产物同时写入**滚动 Release**（tag `Autobuild`，永远只有一条）和 **Artifact 归档**（`r2s-openwrt-<版本>-r<序号>`，保留 90 天） |
+| `.github/workflows/clean-workflow.yml` | Cleanup Old Workflow Runs | — | 维护用：手动清理旧的 Actions 运行记录（默认只保留最近 1 天）。⚠️ **删运行记录会连带删掉那次的 Artifact**，想留档请先下载，或把 `keep_days` 调大 |
 
 ### 工作流输入项
 
@@ -73,7 +73,14 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
 
 1. 把本项目 fork 到你自己的账号（或克隆后推送到自己的仓库）。
 2. 进入 **Actions**，选择需要的工作流 → **Run workflow**，填写上述输入。
-3. 构建完成后，固件会作为 Release 资源（tag `Autobuild`，文件 `*.img.gz`）发布。
+3. 构建完成后，固件会以**两种方式**产出：
+   - **Release**（tag `Autobuild`，文件 `*.img.gz`）—— 供「最新固件」一键下载。
+     该 tag 是**写死**的，每次构建都**原地覆盖**同一条 release（同名附件覆盖、
+     正文重写），所以 Releases 页**永远只有一条**记录；且标签不会随构建移动，
+     **release 正文里的「构建提交」才是本次固件的真实来源**。
+   - **Artifact**（`r2s-openwrt-<版本>-r<序号>`）—— 在 **Actions** → 点进对应
+     那次运行 → 页面底部 **Artifacts** 区下载，**保留 90 天**。
+     需要**历史版本**时用这个。
 
 > **提示**：`workflow_dispatch` 类型的工作流，**其文件必须存在于仓库的默认分支上**，
 > GitHub 才会在 Actions 页面显示 "Run workflow" 按钮（这是 GitHub 的硬性要求）。
