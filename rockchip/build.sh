@@ -90,11 +90,15 @@ PACKAGES=""
 # `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上（见下方中文包一节，
 #   它与 luci-i18n-attendedsysupgrade-zh-cn 一起列出）。
 # ✔ 已核对官方 25.12.5 rockchip/armv8 manifest（openwrt-25.12.5-rockchip-armv8.manifest，
-#   共 128 包）：官方固件 = IB 默认包 + 设备包 + `luci` + `luci-ssl`
-#   + `luci-app-attendedsysupgrade`。
+#   共 128 包）：官方固件 = IB 默认包 + 设备包 + 4 个**显式选中**的额外包
+#   `luci` / `luci-ssl` / `luci-app-attendedsysupgrade` / `owut`。
+#   注意这个 manifest 是 **target 级**的（不含任何设备 kmod，因为它与具体 profile
+#   无关），所以它不含 `kmod-usb-net-rtl8152`；R2S 实机镜像 = 它 + 该设备包。
 #   - `luci-light` / `uhttpd` / `uhttpd-mod-ubus` / `luci-app-firewall` /
-#     `luci-app-package-manager` / `luci-theme-bootstrap` / `rpcd-mod-luci` 等
-#     确实都是元包的自动依赖，不必显式写。
+#     `luci-app-package-manager` / `luci-theme-bootstrap` / `rpcd-mod-luci` /
+#     `libiwinfo*` / `nftables-json` / `libudebug` 等确实都是自动依赖
+#     （分别来自 luci-light、luci-base、luci-mod-status、firewall4、procd/netifd），
+#     不必显式写。
 #   - ⚠ 但 **`luci-ssl` 不是自动依赖**（早先这里写错了，已更正）：
 #     官方 config.buildinfo 里是 `CONFIG_PACKAGE_luci-ssl=y` **显式选中**的；
 #     luci feed 源码中 `luci` 集合只依赖 `luci-light + luci-app-package-manager`
@@ -109,8 +113,9 @@ PACKAGES=""
 #     LuCI 只能走 HTTP，与官方不一致。
 #   - 加了之后行为与官方一致：80/443 同时监听，首次启动自动生成自签证书；
 #     `option redirect_https` 官方默认 0，**不做**强制 HTTP→HTTPS 跳转。
-#   ⇒ 官方 Installed Packages 基线 = `luci`（下一行）+ `luci-ssl`（再下一行）
-#     + 中文包一节里的 `luci-app-attendedsysupgrade`，基线之外的行都是本项目的增量。
+#   ⇒ 官方 Installed Packages 基线 = `luci` + `luci-ssl`（本段两行）
+#     + `luci-app-attendedsysupgrade` + `owut`（见下方中文包一节），
+#     基线之外的行都是本项目的增量。
 PACKAGES="$PACKAGES luci"
 PACKAGES="$PACKAGES luci-ssl"
 PACKAGES="$PACKAGES curl"
@@ -123,9 +128,21 @@ PACKAGES="$PACKAGES openssh-sftp-server"
 PACKAGES="$PACKAGES luci-i18n-base-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
-# 官方基线第 2 包（见上方说明）+ 其简体中文语言包（官方 luci feed，已核实存在）
+# 官方基线第 3 包（见上方说明）+ 其简体中文语言包（官方 luci feed，已核实存在）
 PACKAGES="$PACKAGES luci-app-attendedsysupgrade"
 PACKAGES="$PACKAGES luci-i18n-attendedsysupgrade-zh-cn"
+# 官方基线第 4 包：owut —— 命令行版在线升级工具（ucode 写的，PKGARCH:=all）。
+# 同样**不是**自动依赖：packages feed `utils/owut/Makefile:28`
+#   `DEFAULT:=y if (BUILDBOT && !SMALL_FLASH)`
+# ⇒ 官方 buildbot 构建默认开，所以官方 manifest 里有它，config.buildinfo 里也有
+#   `CONFIG_PACKAGE_owut=y`。它是依赖 attendedsysupgrade-common 的一方
+#   （`DEPENDS:=+attendedsysupgrade-common +rpcd-mod-file +ucode +ucode-mod-fs
+#     +ucode-mod-ubus +ucode-mod-uci +ucode-mod-uclient +ucode-mod-uloop`），
+#   而这些依赖我们本来就全都有 ⇒ 实际只多 1 个包，成本可忽略。
+# ⚠ LuCI 的 ASU 页面**并不调用** owut（只读 uci `attendedsysupgrade.owut.rootfs_size`），
+#   所以它是纯 CLI：装它是为了 SSH 下能 `owut check` / `owut download` /
+#   `owut upgrade`，与官方镜像保持一致。
+PACKAGES="$PACKAGES owut"
 
 # ⚠ 第三方源（dllkids）里的 app 包是中文原生的，**没有**独立语言包：
 #   - luci-app-diskman / luci-app-cpufreq（27.150.x，默认不装，见下方注释行）

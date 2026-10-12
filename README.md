@@ -153,6 +153,14 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
     写入 `attendedsysupgrade.server.url='https://sysupgrade.openwrt.org'`
     与 `client.auto_search='0'`。官方服务器在境外，国内使用较慢；
     本项目**不**擅自换成第三方 ASU 服务器（地址不匹配会导致在线升级失败）。
+  - **`owut` 命令行升级工具：已与官方对齐**。官方 buildbot 构建默认带上它
+    （`utils/owut/Makefile` 的 `DEFAULT:=y if (BUILDBOT && !SMALL_FLASH)`，
+    `config.buildinfo` 里也有 `CONFIG_PACKAGE_owut=y`），本项目**显式写上**。
+    它是纯 CLI（ucode 脚本，`PKGARCH:=all`）：LuCI 的 ASU 页面**不调用**它，
+    只读 `uci get attendedsysupgrade.owut.rootfs_size`。装它是为了 SSH 下能
+    `owut check` / `owut download` / `owut upgrade`。
+    它的依赖（`attendedsysupgrade-common` + ucode 全家 + `rpcd-mod-file`）
+    我们本来就有 ⇒ 实际只多 **1** 个包。
   - **设备端软件源：先备份官方，再切换中科大镜像**：`build.sh` 以 Image
     Builder 的官方 `repositories`（与设备端 distfeeds 同源，含 kmods 内核
     哈希路径）为蓝本，把官方原文备份到
