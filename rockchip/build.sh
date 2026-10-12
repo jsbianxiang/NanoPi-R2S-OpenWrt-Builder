@@ -79,71 +79,109 @@ cat repositories
 # 定义所需安装的包列表 下列插件你都可以自行删减
 # 注意：OpenWrt 官方源不含代理类插件，也不含 ImmortalWrt 系应用
 #       （argon / diskman / cpufreq 等），这些包全部来自注入的第三方源。
-PACKAGES=""
-# ---- LuCI web 界面（关键！）----
-# ⚠ 官方 OpenWrt 的 Image Builder 默认包（DEFAULT_PACKAGES）**不含 LuCI/uhttpd**
-#   （ImmortalWrt 的 IB 默认带，官方不带——迁移差异，实机踩坑验证）。
-#   只装 luci-i18n-*/luci-app-* 会把 luci-base 拉进来但没有 web 服务器，
-#   设备上 /etc/init.d/uhttpd 都不存在，web UI 完全无法访问。
-# `luci` 集合包（官方 luci feed）会带齐：uhttpd + luci-base +
-#   luci-mod-admin-full + luci-theme-bootstrap + rpcd 组件。
-# `luci-app-attendedsysupgrade`：官方 release 固件同样默认带上（见下方中文包一节，
-#   它与 luci-i18n-attendedsysupgrade-zh-cn 一起列出）。
-# ✔ 已核对官方 25.12.5 rockchip/armv8 manifest（openwrt-25.12.5-rockchip-armv8.manifest，
-#   共 128 包）：官方固件 = IB 默认包 + 设备包 + 4 个**显式选中**的额外包
-#   `luci` / `luci-ssl` / `luci-app-attendedsysupgrade` / `owut`。
-#   注意这个 manifest 是 **target 级**的（不含任何设备 kmod，因为它与具体 profile
-#   无关），所以它不含 `kmod-usb-net-rtl8152`；R2S 实机镜像 = 它 + 该设备包。
-#   - `luci-light` / `uhttpd` / `uhttpd-mod-ubus` / `luci-app-firewall` /
-#     `luci-app-package-manager` / `luci-theme-bootstrap` / `rpcd-mod-luci` /
-#     `libiwinfo*` / `nftables-json` / `libudebug` 等确实都是自动依赖
-#     （分别来自 luci-light、luci-base、luci-mod-status、firewall4、procd/netifd），
-#     不必显式写。
-#   - ⚠ 但 **`luci-ssl` 不是自动依赖**（早先这里写错了，已更正）：
-#     官方 config.buildinfo 里是 `CONFIG_PACKAGE_luci-ssl=y` **显式选中**的；
-#     luci feed 源码中 `luci` 集合只依赖 `luci-light + luci-app-package-manager`
-#     （collections/luci/Makefile:14-16），`luci-ssl` 是**另一个独立集合**
-#     （collections/luci-ssl/Makefile:13-16），而且全树没有任何包依赖它
-#     （只有 luci-nginx 提供虚拟名 luci-ssl-nginx）。
-#   - 不加 `luci-ssl` 的后果：它本身是纯元包（目录里只有 Makefile，无任何文件），
-#     唯一实际作用是拉入 `px5g-mbedtls`。而 uhttpd 的启动脚本只在
-#     /usr/sbin/px5g 或 /usr/bin/openssl 存在时才自动生成自签证书
-#     （uhttpd.init:9,55-57,199-201 的 generate_keys）；官方镜像里**没有 openssl**
-#     （只有 mbedtls 系）⇒ 缺 px5g 就不会生成 /etc/uhttpd.crt，443 起不来，
-#     LuCI 只能走 HTTP，与官方不一致。
-#   - 加了之后行为与官方一致：80/443 同时监听，首次启动自动生成自签证书；
-#     `option redirect_https` 官方默认 0，**不做**强制 HTTP→HTTPS 跳转。
-#   ⇒ 官方 Installed Packages 基线 = `luci` + `luci-ssl`（本段两行）
-#     + `luci-app-attendedsysupgrade` + `owut`（见下方中文包一节），
-#     基线之外的行都是本项目的增量。
-PACKAGES="$PACKAGES luci"
-PACKAGES="$PACKAGES luci-ssl"
-PACKAGES="$PACKAGES curl"
-PACKAGES="$PACKAGES bind-tools"
-PACKAGES="$PACKAGES ca-certificates"
-PACKAGES="$PACKAGES openssh-sftp-server"
-# ---- 中文语言包 ----
-# 以下包来自 OpenWrt 官方源（luci feed），均有配套的 luci-i18n-*-zh-cn：
-# LuCI 主界面简体中文（luci-i18n-base-zh-cn，官方 luci feed）
-PACKAGES="$PACKAGES luci-i18n-base-zh-cn"
-PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
-PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
-# 官方基线第 3 包（见上方说明）+ 其简体中文语言包（官方 luci feed，已核实存在）
-PACKAGES="$PACKAGES luci-app-attendedsysupgrade"
-PACKAGES="$PACKAGES luci-i18n-attendedsysupgrade-zh-cn"
-# 官方基线第 4 包：owut —— 命令行版在线升级工具（ucode 写的，PKGARCH:=all）。
-# 同样**不是**自动依赖：packages feed `utils/owut/Makefile:28`
-#   `DEFAULT:=y if (BUILDBOT && !SMALL_FLASH)`
-# ⇒ 官方 buildbot 构建默认开，所以官方 manifest 里有它，config.buildinfo 里也有
-#   `CONFIG_PACKAGE_owut=y`。它是依赖 attendedsysupgrade-common 的一方
-#   （`DEPENDS:=+attendedsysupgrade-common +rpcd-mod-file +ucode +ucode-mod-fs
-#     +ucode-mod-ubus +ucode-mod-uci +ucode-mod-uclient +ucode-mod-uloop`），
-#   而这些依赖我们本来就全都有 ⇒ 实际只多 1 个包，成本可忽略。
-# ⚠ LuCI 的 ASU 页面**并不调用** owut（只读 uci `attendedsysupgrade.owut.rootfs_size`），
-#   所以它是纯 CLI：装它是为了 SSH 下能 `owut check` / `owut download` /
-#   `owut upgrade`，与官方镜像保持一致。
-PACKAGES="$PACKAGES owut"
+#
+# ===========================================================================
+# PACKAGES 分三层，务必分清「哪些是官方、哪些是本项目加的」：
+#   A. OFFICIAL_BASELINE  与官方镜像**逐包对齐**的基线（只有 4 个包）
+#   B. LOCAL_ADDITIONS    本项目在基线之上的预置增量（全部官方源）
+#   C. $CUSTOM_PACKAGES   第三方源增量（shell/custom-packages.sh，见下方）
+#
+# 构建期由 Image Builder **自动加入**、不能也不需要在此声明的部分：
+#   - DEFAULT_PACKAGES（29 个，来自 include/target.mk + include/default-packages.mk）
+#   - 本机型的 device_packages（kmod-usb-net-rtl8152，见 profiles.json）
+#   - kernel
+#   - 以上全部包的依赖闭包（约 96 个）
+#   （IB 的 PACKAGES 是**追加**语义而非覆盖：target/imagebuilder/files/Makefile:43
+#    注释 "include extra packages"；:143/:146 组包顺序 =
+#    USER_PACKAGES + DEFAULT_PACKAGES + profile 包 + kernel）
+# ⇒ **只写 A** 时，产出的包集合 == 官方镜像（target 级 manifest 128 包 + 设备包）。
+# ===========================================================================
 
+# ===========================================================================
+# A. 官方基线：与官方 25.12.5 rockchip/armv8 镜像逐包对齐
+# ===========================================================================
+# 官方镜像 = IB 默认包 + 设备包 + **4 个显式选中**的额外包（就是下面这 4 个）。
+# 依据：官方 openwrt-25.12.5-rockchip-armv8.manifest（128 包）**逐项溯源** ——
+#   减去 DEFAULT_PACKAGES(29) 与设备包(1) 后剩 98 个，其中 **96 个**都能追到某个
+#   包的依赖，只有这 4 个是「谁都不依赖」的显式选择：
+#
+#   luci                         config.buildinfo: CONFIG_PACKAGE_luci=y
+#   luci-ssl                     同上（**不是** luci 的依赖，见下）
+#   luci-app-attendedsysupgrade  Makefile: LUCI_DEFAULT:=y if (BUILDBOT && PACKAGE_luci)
+#   owut                         Makefile: DEFAULT:=y if (BUILDBOT && !SMALL_FLASH)
+#
+# 那 96 个自动依赖的来源（记下来，免得以后重复排查）：
+#   luci 栈 / rpcd(7) / ucode(10) / uhttpd(2)  ← luci-light / luci-base
+#   libiwinfo*          ← luci-mod-status（LUCI_DEPENDS:=+libiwinfo +rpcd-mod-iwinfo）
+#   nftables-json       ← firewall4（firewall4/Makefile:27）
+#   libudebug           ← procd（procd/Makefile:43）/ netifd（netifd/Makefile:24）
+#   px5g-mbedtls、libustream-mbedtls ← luci-ssl
+#   attendedsysupgrade-common ← luci-app-attendedsysupgrade（也 ← owut）
+#   getrandom           ← urandom-seed
+#   procd-seccomp       ← base-files 的 USE_SECCOMP 条件依赖
+#   其余 base 系统与库（busybox / procd / ubus / ubox / jshn / zlib / libgcc1 …）
+#                       ← base-files（DEPENDS 见 package/base-files/Makefile:42-46）
+#
+# ⚠ 两个容易踩的坑：
+#   1) 这个 manifest 是 **target 级**的，**不含任何设备 kmod**
+#      （CONFIG_TARGET_MULTI_PROFILE=y ⇒ 与具体 profile 无关；
+#        `grep -cE 'rtl8152|r8169|nvme'` = 0）。R2S 实机镜像 = 它 + kmod-usb-net-rtl8152。
+#   2) 固件选择器网页上那个 "Installed Packages" 框**不是**对齐目标：它只列 32 项
+#      （默认包 29 + 设备包 1 + luci + luci-app-attendedsysupgrade），而官方镜像
+#      实际装了 128 个 —— 差的就是依赖闭包。要对齐请看 manifest。
+#
+# 为什么这 4 个都不能靠依赖自动带出：
+#   - `luci` 集合只依赖 `luci-light + luci-app-package-manager`
+#     （collections/luci/Makefile:14-16），**不含** luci-ssl；`luci-ssl` 是另一个
+#     独立集合（collections/luci-ssl/Makefile:13-16），且全树没有任何包依赖它
+#     （只有 luci-nginx 提供虚拟名 luci-ssl-nginx）。它本身是纯元包（目录里只有
+#     Makefile），唯一实际作用是拉入 px5g-mbedtls —— 而 uhttpd 只在
+#     /usr/sbin/px5g 或 /usr/bin/openssl 存在时才自动生成自签证书
+#     （uhttpd.init:9,55-57,199-201），官方镜像**没有 openssl**（只有 mbedtls 系）
+#     ⇒ 缺 px5g 就不会生成 /etc/uhttpd.crt，443 起不来，LuCI 只能走 HTTP。
+#   - `owut` 与 attendedsysupgrade 的依赖方向是 owut → attendedsysupgrade-common，
+#     **不是**反过来，所以 luci-app-attendedsysupgrade 永远带不出它；LuCI 的 ASU
+#     页面也不调用 owut（只读 uci attendedsysupgrade.owut.rootfs_size），它是纯 CLI，
+#     装它是为了 SSH 下能 `owut check` / `owut download` / `owut upgrade`。
+OFFICIAL_BASELINE="luci luci-ssl luci-app-attendedsysupgrade owut"
+# ===========================================================================
+# B. 本项目增量：在官方基线之上追加（全部来自 OpenWrt 官方源）
+#    把 LOCAL_ADDITIONS 清空即回到「纯官方固件」。
+# ===========================================================================
+# ⚠ 官方 OpenWrt 的 IB 默认包**不含 LuCI/uhttpd**（ImmortalWrt 的 IB 默认带，
+#   官方不带——迁移差异，实机踩坑验证）。只装 luci-i18n-*/luci-app-* 会把
+#   luci-base 拉进来但没有 web 服务器，设备上 /etc/init.d/uhttpd 都不存在，
+#   web UI 完全无法访问。基线 A 里的 `luci` / `luci-ssl` 已带齐
+#   uhttpd + luci-base + luci-mod-admin-full + luci-theme-bootstrap + rpcd 组件。
+LOCAL_ADDITIONS=""
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS curl"
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS bind-tools"
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS ca-certificates"
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS openssh-sftp-server"
+# ---- 中文语言包（官方 luci feed，均带独立 i18n 包，已逐一核实存在）----
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS luci-i18n-base-zh-cn"
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS luci-i18n-package-manager-zh-cn"
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS luci-i18n-firewall-zh-cn"
+LOCAL_ADDITIONS="$LOCAL_ADDITIONS luci-i18n-attendedsysupgrade-zh-cn"
+
+# ---------------------------------------------------------------------------
+# 只装官方基线（用于与官方 manifest 做逐包比对）：
+#     BUILD_OFFICIAL_ONLY=1 bash build.sh
+# 会同时跳过 B 增量与 C 第三方包，产出「纯官方」包集合。
+# ---------------------------------------------------------------------------
+if [ "${BUILD_OFFICIAL_ONLY:-0}" = "1" ]; then
+    echo "⚠ BUILD_OFFICIAL_ONLY=1：只装官方基线 A，跳过 B 增量与 C 第三方包"
+    LOCAL_ADDITIONS=""
+    CUSTOM_PACKAGES=""
+fi
+
+PACKAGES="$OFFICIAL_BASELINE $LOCAL_ADDITIONS"
+
+# ===========================================================================
+# C. 第三方增量：只装 $CUSTOM_PACKAGES（由 shell/custom-packages.sh 决定）
+#    这些包**不在** OpenWrt 官方源里，必须靠下方注入的 dllkids 源。
+#    清空 CUSTOM_PACKAGES（或用 BUILD_OFFICIAL_ONLY=1）即不装任何第三方包。
+# ===========================================================================
 # ⚠ 第三方源（dllkids）里的 app 包是中文原生的，**没有**独立语言包：
 #   - luci-app-diskman / luci-app-cpufreq（27.150.x，默认不装，见下方注释行）
 #     包内**自带简体中文**，若再显式安装同名的独立 i18n 包，apk 会因文件冲突报
@@ -170,8 +208,7 @@ PACKAGES="$PACKAGES owut"
 #（自动展开 luci-app-<短名> + luci-i18n-<短名>-zh-cn）。
 # ---- TCP 拥塞控制：维持官方默认 cubic，不预装 kmod-tcp-bbr ----
 # 原因与设备端手动启用 BBR 的方法见上方「TCP 拥塞控制」注释块。
-# ======== shell/custom-packages.sh =======
-# 合并 OpenWrt 官方源以外的第三方插件
+# ---- C 合并：把第三方增量接到 PACKAGES 尾部 ----
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 
 # 构建镜像

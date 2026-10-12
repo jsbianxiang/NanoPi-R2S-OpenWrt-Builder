@@ -408,12 +408,41 @@ DLLKIDS_KEY_URL="https://down.dllkids.xyz/openwrt-feed/keys/dllkids-feed.pub.pem
 
 ### 预置软件包清单
 
-默认包列表定义在 `rockchip/build.sh` 的 `PACKAGES` 变量中；
-可选软件包定义在 `shell/custom-packages.sh`：
+`rockchip/build.sh` 里的包列表分**三层**，目的就是把「官方有的」和「本项目加的」分清楚：
 
-- **OpenWrt 官方源的软件**：把要装的**短名**填进 `ENABLE_APPS`（空格分隔），
-  脚本会自动展开为 `luci-app-<短名>` + `luci-i18n-<短名>-zh-cn`。
-  例：`ENABLE_APPS="filemanager sqm ttyd"`。A 组共 **82** 个可用短名（已逐一校验）。
+| 层 | 变量 | 内容 | 如何关闭 |
+| --- | --- | --- | --- |
+| **A 官方基线** | `OFFICIAL_BASELINE` | `luci`、`luci-ssl`、`luci-app-attendedsysupgrade`、`owut` —— 与官方镜像**逐包对齐** | 不建议 |
+| **B 本项目增量** | `LOCAL_ADDITIONS` | `curl`、`bind-tools`、`ca-certificates`、`openssh-sftp-server` + 4 个中文语言包 | 置空即回到纯官方 |
+| **C 第三方增量** | `$CUSTOM_PACKAGES` | dllkids 源插件（默认 Clashoo），由 `shell/custom-packages.sh` 决定 | 置空即不装 |
+
+**A 层只有 4 个包就等于官方镜像** —— 因为 Image Builder 会自动补上
+`DEFAULT_PACKAGES`（29 个）+ 本机型 `device_packages`（`kmod-usb-net-rtl8152`）
++ `kernel` + 以上全部包的依赖闭包（约 96 个）。
+依据是官方 `openwrt-25.12.5-rockchip-armv8.manifest` 的 128 包**逐项溯源**：
+减去默认包与设备包后剩 98 个，其中 96 个都能追到某个包的依赖，
+只有 A 层这 4 个是「谁都不依赖」的显式选择（逐条判据写在 `build.sh` 的 A 层注释里）。
+
+> ⚠ 固件选择器网页上那个 "Installed Packages" 框**不是**对齐目标：它只列 32 项
+> （默认包 + 设备包 + `luci` + `luci-app-attendedsysupgrade`），而官方镜像实际装了
+> **128** 个 —— 差的就是依赖闭包。要比对请用 manifest。
+> 另注：该 manifest 是 **target 级**的、不含任何设备 kmod
+> （`CONFIG_TARGET_MULTI_PROFILE=y`），R2S 实机镜像 = 它 + `kmod-usb-net-rtl8152`。
+
+**只装 A 层**（用于与官方 manifest 逐包比对）：
+
+```sh
+BUILD_OFFICIAL_ONLY=1 bash rockchip/build.sh
+```
+
+会同时跳过 B 增量与 C 第三方包，产出「纯官方」包集合。
+
+#### B / C 层的可选项
+
+- **OpenWrt 官方源的软件**：把要装的**短名**填进 `shell/custom-packages.sh` 的
+  `ENABLE_APPS`（空格分隔），脚本会自动展开为 `luci-app-<短名>` +
+  `luci-i18n-<短名>-zh-cn`。例：`ENABLE_APPS="filemanager sqm ttyd"`。
+  A 组共 **82** 个可用短名（已逐一校验）。
 - **仅第三方源提供的应用**：把短名填进 `THIRD_PARTY_APPS`，
   只展开 `luci-app-<短名>`、不加 i18n 包（该源无语言包）。B 组共 **47** 个可用短名。
 - **例外**：`cpufreq` / `diskman` 两个 app 包（第三方源，版本 `27.150.x`，
