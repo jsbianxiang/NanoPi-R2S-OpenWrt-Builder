@@ -24,11 +24,17 @@
 #      ⚠ OpenWrt 官方源**没有**代理类插件，也没有 ImmortalWrt 系应用
 #      （argon / diskman / cpufreq 等），这些包全部依赖注入的第三方源。
 #   2. 【代理类插件互斥 —— 已由构建期硬校验兜底】
-#      下面这些包**全部是「透明代理接管型」**，只能启用其中一个：
+#      下面这些包**全部是「透明代理接管型」**，只能启用其中一个（共 27 套）：
 #        clashoo / nikki / openclash / passwall / passwall2 / ssr-plus /
 #        homeproxy / dae / daed / daed-next / daede /
 #        shadowsocks / shadowsocks-libev / shadowsocks-rust /
-#        redsocks / redsocks2 / xray / v2raya
+#        redsocks / redsocks2 / domain-proxy / xray / v2raya /
+#        ss-redir / nekobox / honk / jederproxy / xjay /
+#        mproxy / miniproxy / fchomo
+#      ⚠ **判定真源是 rockchip/build.sh 的 `_PROXY_STACKS` 表（27 条）**。
+#        本清单与 README「代理插件互斥」表都只是它的人读副本，三处必须同步。
+#        build.sh 在硬校验之后还有一段「关键词启发式提示」兜底：日后源里
+#        新冒出来的代理前端会被点名提示，不会静默漏过。
 #      原因：它们各自写 nftables/iptables 的 REDIRECT/TPROXY 规则、各自劫持
 #      DNS、抢占同一批端口、各自注册 init 脚本与 UCI 配置包 —— 双开会互相覆盖。
 #      ⚠ 不用靠记性：rockchip/build.sh 里有硬校验，检测到 ≥2 套会**直接
@@ -113,6 +119,19 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-
 #   luci-app-redsocks / luci-app-redsocks2
 #   luci-app-xray          （⚠ luci-app-xray-status 是它的配套状态页，不算独立栈，可共存）
 #   v2raya                 （官方源与 dllkids 源都有）
+#   luci-app-ss-redir      （shadowsocks 的透明重定向组件；极简配置页仅 3.5 KiB）
+#   luci-app-nekobox       （sing-box 前端，apk 内置内核 10 MiB）
+#   luci-app-honk          （eBPF 透明代理引擎，dae 兼容；apk 9.6 MiB）
+#   luci-app-jederproxy    （nftables/iptables 规则生成器，后端支持 mihomo/clash）
+#   luci-app-xjay          （xray-core 的另一个 LuCI 前端）
+#   luci-app-mproxy / -miniproxy / -fchomo   （按包名与体积判定，置信度略低）
+#
+# 以上后 8 项是 2026-10-12「联动审计」补进来的 —— 原表只有 18 套，漏了它们。
+# 审计方法（可复现）：取 dllkids 源目录列表里的全部 406 个 luci-app-*，按
+#   ① 包名关键词（clash / ss / xray / v2ray / proxy / dae …）
+#   ② apk 体积（自带内核的前端必然 ≥ 数 MiB：nekobox 10 MiB、honk 9.6 MiB、
+#      openclash 7.8 MiB；而纯配置页只有几 KiB：redsocks 2.5 KiB、ss-redir 3.5 KiB）
+# 两个维度筛出候选，再用上游仓库 README 定性。
 #
 # 包来源已核对（写包时不用猜）：
 #   官方源：xray-core / sing-box / luci-compat / ip-full / unzip / bash / curl

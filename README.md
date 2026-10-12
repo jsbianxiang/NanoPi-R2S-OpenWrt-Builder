@@ -420,7 +420,7 @@ dllkids 源里所有**透明代理接管型**插件都只能启用**一个**。�
 脚本与 UCI 配置包。双开的后果是规则打架、LuCI 配置错乱、DNS 解析冲突 ——
 轻则无法科学上网，重则刷机后直接断网。
 
-**已核实存在于 dllkids 源、且互斥的代理栈**（18 个）：
+**已核实存在于 dllkids 源、且互斥的代理栈**（27 个）：
 
 | 代理栈 | 标志包 |
 | --- | --- |
@@ -432,14 +432,34 @@ dllkids 源里所有**透明代理接管型**插件都只能启用**一个**。�
 | SSR-Plus | `luci-app-ssr-plus` |
 | homeproxy | `luci-app-homeproxy` |
 | Daed 系 | `luci-app-dae` / `-daed` / `-daed-next` / `-daede` |
-| shadowsocks 系 | `luci-app-shadowsocks` / `-libev` / `-rust` |
-| redsocks 系 | `luci-app-redsocks` / `-redsocks2` |
+| shadowsocks 系 | `luci-app-shadowsocks` / `luci-app-shadowsocks-libev` / `luci-app-shadowsocks-rust` |
+| redsocks 系 | `luci-app-redsocks` / `luci-app-redsocks2` |
+| domain-proxy | `luci-app-domain-proxy`（redsocks 的另一种前端：走 dnsmasq+ipset 域名分流） |
 | xray | `luci-app-xray` |
 | v2raya | `v2raya` |
+| ss-redir | `luci-app-ss-redir` |
+| nekobox | `luci-app-nekobox` |
+| honk | `luci-app-honk` |
+| jederproxy | `luci-app-jederproxy` |
+| xjay | `luci-app-xjay` |
+| mproxy | `luci-app-mproxy` |
+| miniproxy | `luci-app-miniproxy` |
+| fchomo | `luci-app-fchomo` |
+
+> 后 9 项是 2026-10-12「联动审计」补入的。起因：原表只有 18 套，而 dllkids
+> 源有 **406 个 `luci-app-*`**，人工维护的黑名单必然滞后。审计方法（可复现）：
+> 从源目录列表按 ① 包名关键词（clash / ss / xray / v2ray / proxy / dae …）
+> ② apk 体积（自带内核的前端必然 ≥ 数 MiB —— nekobox 10 MiB、honk 9.6 MiB、
+> openclash 7.8 MiB；而纯配置页只有几 KiB —— redsocks 2.5 KiB、ss-redir
+> 3.5 KiB）两个维度筛出候选，再用上游仓库 README 定性（domain-proxy 由
+> Makefile 的 `LUCI_TITLE:="Domain Proxy for redsocks."` 定性）。末三个
+> （mproxy / miniproxy / fchomo）按包名与体积推断，置信度略低，若属误判删行即可。
 
 **不算冲突**（可与其他栈共存）：`luci-app-xray-status`（xray 的配套状态页）、
-`microsocks` / `gost` / `softethervpn`（服务端）、`tun2socks`（助手）、
-`smartdns` / `mosdns` / `chinadns-ng` / `adguardhome`（DNS 层）、
+`microsocks` / `gost` / `softethervpn` / `luci-app-ssrserver-python` /
+`luci-app-v2ray-server`（服务端）、`tun2socks`（助手）、`smartdns` / `mosdns` /
+`chinadns-ng` / `adguardhome` / `dnsproxy` / `dnscrypt-proxy2`（DNS 层）、
+`ikoolproxy`（广告过滤）、`haproxy-tcp`（负载均衡）、
 `geoview` / `v2ray-geoip` / `v2ray-geosite`（数据包）。
 
 **换栈三步走**（改 `shell/custom-packages.sh`）：
@@ -463,6 +483,13 @@ ALLOW_PROXY_CONFLICT=1 bash rockchip/build.sh
 
 > ⚠ 校验用**整词**匹配，不会误判：`luci-app-passwall2` ≠ `luci-app-passwall`、
 > `luci-app-xray-status` ≠ `luci-app-xray`、`luci-app-daed-next` ≠ `luci-app-daed`。
+>
+> 💡 另有**兜底提示**（只提示、不报错）：黑名单挡不住源里新冒出来的代理前端，
+> 所以 `build.sh` 还会扫一遍已选包，凡 `luci-app-*` 命中代理关键词
+> （clash / ss / xray / v2ray / proxy / nekobox / dae …）又不在上表里的，
+> 会打印「疑似代理类」并提醒你补 `_PROXY_STACKS`。状态页 / 服务端 / DNS 层
+> （`luci-app-xray-status`、`luci-app-ssrserver-python`、`luci-app-v2ray-server`
+> 等）已在白名单里，不会被误提示。
 > 新增代理栈时，记得同步更新 `build.sh` 里的 `_PROXY_STACKS` 表。
 
 ### 预置软件包清单
