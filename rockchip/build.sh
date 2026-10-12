@@ -211,6 +211,97 @@ PACKAGES="$OFFICIAL_BASELINE $LOCAL_ADDITIONS"
 # ---- C 合并：把第三方增量接到 PACKAGES 尾部 ----
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 
+# ===========================================================================
+# 代理类插件互斥 —— 构建期硬校验
+# ---------------------------------------------------------------------------
+# 本项目默认启用 Clashoo（见 shell/custom-packages.sh「一」）。若想换成
+# dllkids（kenzok8）源里的其他代理（nikki / openclash / passwall(2) /
+# ssr-plus / homeproxy / dae(d) / shadowsocks / redsocks / xray / v2raya …），
+# **必须先停旧的再开新的**，不能双开。
+#
+# 为什么不能双开 —— 这些插件每一套都会**独自接管整个透明代理**：
+#   - 各自写 nftables/iptables 的 REDIRECT / TPROXY 规则（链名与优先级不同，
+#     互相覆盖后流量走向不确定）；
+#   - 各自劫持 DNS（dnsmasq 的 server/ipset/nftset 与 53 端口占用）；
+#   - 抢占同一批端口（7890-7895 / 9090 / 1080 / 53 …）；
+#   - 各自注册 /etc/init.d 脚本与 UCI 配置包，LuCI 页面选项重名。
+#   后果是规则打架、LuCI 配置错乱、DNS 解析冲突：轻则无法科学上网，
+#   重则刷机后直接断网。而且这类问题往往刷完才暴露 —— 所以拦在构建期。
+#
+# 判定：$PACKAGES 里出现 ≥2 个「代理栈」即失败。
+#   ⚠ 必须**整词**匹配，不能用 grep 子串，否则会误判：
+#       luci-app-passwall2   是与 luci-app-passwall 不同的包；
+#       luci-app-xray-status 是 luci-app-xray 的**配套状态页**（可共存，不算独立栈）；
+#       luci-app-daed-next / luci-app-daede 与 luci-app-daed 也是不同包。
+#     因此这里用 case 的 " $PACKAGES " 整词匹配，而不是 grep。
+#
+# 放行：确需同时安装（仅实验用途、不指望能上网）时设 ALLOW_PROXY_CONFLICT=1。
+# ===========================================================================
+_PROXY_STACKS="
+clashoo|luci-app-clashoo clashoo
+nikki|luci-app-nikki nikki
+openclash|luci-app-openclash
+passwall|luci-app-passwall
+passwall2|luci-app-passwall2
+ssr-plus|luci-app-ssr-plus
+homeproxy|luci-app-homeproxy
+dae|luci-app-dae dae
+daed|luci-app-daed daed
+daed-next|luci-app-daed-next
+daede|luci-app-daede
+shadowsocks|luci-app-shadowsocks
+shadowsocks-libev|luci-app-shadowsocks-libev
+shadowsocks-rust|luci-app-shadowsocks-rust
+redsocks|luci-app-redsocks
+redsocks2|luci-app-redsocks2
+xray|luci-app-xray
+v2raya|v2raya
+"
+_PROXY_HIT=""
+while IFS='|' read -r _stack _markers; do
+    [ -n "$_stack" ] || continue
+    for _m in $_markers; do
+        case " $PACKAGES " in
+            *" $_m "*) _PROXY_HIT="$_PROXY_HIT $_stack"; break ;;
+        esac
+    done
+done <<EOF
+$_PROXY_STACKS
+EOF
+_PROXY_HIT="${_PROXY_HIT# }"
+_PROXY_N=0
+for _h in $_PROXY_HIT; do _PROXY_N=$((_PROXY_N + 1)); done
+
+if [ "$_PROXY_N" -gt 1 ]; then
+    {
+        echo ""
+        echo "=============================================================="
+        echo "ERROR: 检测到 $_PROXY_N 套代理插件同时启用：$_PROXY_HIT"
+        echo "--------------------------------------------------------------"
+        echo "它们都会各自接管透明代理（防火墙规则 / DNS / TUN / 端口），"
+        echo "双开会互相覆盖规则、LuCI 配置错乱、DNS 劫持冲突，"
+        echo "轻则无法科学上网，重则刷机后直接断网。"
+        echo ""
+        echo "改法（shell/custom-packages.sh）—— 先停旧的，再开新的："
+        echo "  1) 注释掉「一」里当前启用的那行（默认是 Clashoo）；"
+        echo "  2) 取消你要用的那行注释；"
+        echo "  3) 重跑构建。"
+        echo ""
+        echo "确需同时安装（仅实验用途、不指望能上网）："
+        echo "  ALLOW_PROXY_CONFLICT=1 bash rockchip/build.sh"
+        echo "=============================================================="
+        echo ""
+    } >&2
+    if [ "${ALLOW_PROXY_CONFLICT:-0}" != "1" ]; then
+        exit 1
+    fi
+    echo "⚠ ALLOW_PROXY_CONFLICT=1：已显式放行代理插件互斥，继续构建（风险自负）。" >&2
+else
+    echo "✅ 代理插件互斥检查通过：启用 ${_PROXY_N} 套（${_PROXY_HIT:-无}）"
+fi
+
+unset _PROXY_STACKS _PROXY_HIT _PROXY_N _stack _markers _m _h
+
 # 构建镜像
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"

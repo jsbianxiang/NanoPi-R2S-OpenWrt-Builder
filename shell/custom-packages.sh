@@ -23,8 +23,19 @@
 #      自行加源方法见 README「如何自行增加第三方源」。
 #      ⚠ OpenWrt 官方源**没有**代理类插件，也没有 ImmortalWrt 系应用
 #      （argon / diskman / cpufreq 等），这些包全部依赖注入的第三方源。
-#   2. 【代理类插件互斥】clashoo / nikki / openclash / passwall / ssr-plus
-#      的配置互相冲突，只能启用其中一个。
+#   2. 【代理类插件互斥 —— 已由构建期硬校验兜底】
+#      下面这些包**全部是「透明代理接管型」**，只能启用其中一个：
+#        clashoo / nikki / openclash / passwall / passwall2 / ssr-plus /
+#        homeproxy / dae / daed / daed-next / daede /
+#        shadowsocks / shadowsocks-libev / shadowsocks-rust /
+#        redsocks / redsocks2 / xray / v2raya
+#      原因：它们各自写 nftables/iptables 的 REDIRECT/TPROXY 规则、各自劫持
+#      DNS、抢占同一批端口、各自注册 init 脚本与 UCI 配置包 —— 双开会互相覆盖。
+#      ⚠ 不用靠记性：rockchip/build.sh 里有硬校验，检测到 ≥2 套会**直接
+#        exit 1** 并打印改法。确需双开（仅实验用途）可 ALLOW_PROXY_CONFLICT=1 放行。
+#      ⚠ 不算冲突的（可与其他栈共存）：luci-app-xray-status（xray 的配套状态页）、
+#        microsocks / gost / softethervpn（服务端）、tun2socks（助手）、
+#        smartdns / mosdns / chinadns-ng / adguardhome（DNS 层）、geoview 等数据包。
 #   3. 本分支不集成 store / istore，故不提供依赖 istore 的插件选项。
 #   4. 硬路由 / 小闪存设备请酌情启用；包过多会导致固件过大或构建失败。
 #   5. 「三」的短名已对 OpenWrt 25.12.5 官方源（aarch64_generic 的
@@ -45,15 +56,17 @@
 # 一、第三方插件（dllkids 源）
 # -----------------------------------------------------------------------------
 # rockchip/build.sh 注入的第三方源（25.12 / aarch64_generic）除 Clashoo 外，
-# 还提供 luci-app-ssr-plus / passwall2 / nikki / openclash / mihomo 等，
-# 需要时取消 1.2 的注释即可，无需另外加源。
+# 还提供下面这些代理栈（**已对该源目录逐个核实存在**），需要时取消 1.2 的
+# 注释即可，无需另外加源。
 #
 # ⚠ 该源的第三方 LuCI 应用**没有**独立中文语言包（中文界面为包内原生），
 #   所以不要给它们加 luci-i18n-xxx-zh-cn，否则 make image 会因找不到包而失败。
 #   （唯一例外：Clashoo——源里确有 luci-i18n-clashoo-zh-cn，已在「一」默认启用，
 #     CI 实测可正常安装；除此之外一律不要加 i18n 包。）
 # =============================================================================
-# 【当前已启用】Clashoo —— ⚠ 与 nikki 配置冲突，不可同时启用
+# 【当前已启用】Clashoo（主方案；备用方案是 Daed，两者不可同时接管透明代理）
+#   ⚠ 想换成别的代理栈，见 1.2 —— 先注释掉下面这行，再取消目标行注释。
+#     漏掉「先停旧的」这一步会被 rockchip/build.sh 的互斥校验直接拦下。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 
 # -----------------------------------------------------------------------------
@@ -63,10 +76,20 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-
 # 第三方应用是中文原生，没有独立语言包，故都不带 luci-i18n-*-zh-cn
 # （Clashoo 是唯一例外，见「一」）。
 #
-# ⚠⚠⚠ 启用下面任何一行之前，必须先把上面已启用的 Clashoo 行注释掉！
-#   两套代理插件会同时接管防火墙规则与 DNS：轻则规则打架、LuCI 配置错乱、
-#   DNS 劫持冲突，重则 make image 直接失败或刷机后断网。
-#   更换方式 = 先停旧的，再开新的，任何时候都不要双开。
+# =============================================================================
+# ⚠⚠⚠ 换代理插件 = 「先停旧的，再开新的」，三步走，任何时候都不要双开：
+#   1) 注释掉「一」里当前启用的 Clashoo 行；
+#   2) 取消下面**一行**的注释（只取消一行！）；
+#   3) 重跑构建。
+#   漏掉第 1 步会被 rockchip/build.sh 的互斥校验直接 exit 1 拦下
+#   （校验清单见文件头注意事项 2）。
+#
+#   为什么必须互斥：这些插件每一套都会**独自接管整个透明代理** ——
+#   各自写 nftables/iptables 的 REDIRECT/TPROXY 规则、各自劫持 DNS、
+#   抢占同一批端口（7890-7895 / 9090 / 1080 / 53 …）、各自注册 init 脚本
+#   与 UCI 配置包。双开的后果：规则打架、LuCI 配置错乱、DNS 解析冲突 ——
+#   轻则无法科学上网，重则刷机后直接断网。
+# =============================================================================
 #
 # SSR-Plus —— mihomo 内核由 rockchip/build.sh 自动补进 PACKAGES，这里不用写
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-ssr-plus xray-core naiveproxy kmod-nft-tproxy kmod-nft-socket"
@@ -76,6 +99,28 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-nikki nikki kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket"
 #
 # OpenClash 不列在这里，它在「二」2.3（内核由 rockchip/build.sh 处理）。
+#
+# -----------------------------------------------------------------------------
+# 同源**其他**代理栈（同样互斥；已核实存在于 dllkids 25.12/aarch64_generic 源）
+# -----------------------------------------------------------------------------
+# 只列包名与常见搭配；需要时按上面同样的格式写一行即可。它们全部会被
+# build.sh 的互斥校验识别（将来新增栈时记得同步更新 build.sh 的 _PROXY_STACKS 表）。
+#
+#   luci-app-homeproxy     + sing-box
+#   luci-app-passwall      + geoview xray-core sing-box hysteria
+#   luci-app-dae / daed / daed-next / daede   + dae / daed
+#   luci-app-shadowsocks / luci-app-shadowsocks-libev / luci-app-shadowsocks-rust
+#   luci-app-redsocks / luci-app-redsocks2
+#   luci-app-xray          （⚠ luci-app-xray-status 是它的配套状态页，不算独立栈，可共存）
+#   v2raya                 （官方源与 dllkids 源都有）
+#
+# 包来源已核对（写包时不用猜）：
+#   官方源：xray-core / sing-box / luci-compat / ip-full / unzip / bash / curl
+#   dllkids：hysteria / naiveproxy / geoview / mihomo / clashoo / nikki / 上述 luci-app-*
+#   官方 kmods feed：kmod-tun / kmod-nft-tproxy / kmod-nft-socket / kmod-inet-diag
+#     （IB 的 repositories 含 kmods 源 —— 官方 IB 用 CONFIG_BUILDBOT=y 构建，
+#       feeds.mk:52-58 才会输出 kmods 那一行；已核实这些 kmod 确实存在于
+#       25.12.5 的 6.12.94-1-5fab3a97d147fbf8146094eeebd78fd9 目录。）
 
 # =============================================================================
 # 二、可选软件包开关
@@ -116,10 +161,10 @@ unset _app
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-battstatus luci-i18n-battstatus-zh-cn"
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-dashboard luci-i18n-dashboard-zh-cn"
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-mod-dsl luci-i18n-dsl-zh-cn"
-# 代理（⚠⚠ 与 Clashoo 互斥：启用 passwall 前必须先注释掉「一」的 Clashoo 行）
+# 代理（⚠⚠ 与 Clashoo 互斥 —— 换栈三步走见 1.2；漏做会被 build.sh 硬拦）
 #       app 本体在「三」B 组，用 THIRD_PARTY_APPS="passwall" 启用；下面只补依赖与内核
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview xray-core sing-box hysteria"
-# OpenClash（⚠⚠ 与 Clashoo 互斥：启用前必须先注释掉 Clashoo 行；
+# OpenClash（⚠⚠ 与 Clashoo 互斥 —— 换栈三步走见 1.2；
 #             meta 内核与 GeoIP/GeoSite 由 rockchip/build.sh 自动下载）
 #CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-openclash luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy bash curl ip-full unzip"
 
@@ -168,11 +213,13 @@ unset _app
 # -----------------------------------------------------------------------------
 # B 组：仅第三方源 dllkids 提供（填进 2.2 的 THIRD_PARTY_APPS，不带 i18n 包）
 # -----------------------------------------------------------------------------
-# --- 代理 / VPN（⚠⚠ homeproxy / passwall / dae 与 Clashoo 互斥，见注意事项 2：
-#     启用前必须先注释掉「一」的 Clashoo 行；microsocks / softethervpn /
-#     ipsec-vpnd / gost 是代理服务器类，与 Clashoo 不冲突）---
-#   homeproxy                 passwall                  dae                       microsocks                softethervpn
-#   ipsec-vpnd                gost
+# --- 代理 / VPN（⚠⚠ homeproxy / passwall / dae / daed 与 Clashoo 互斥，
+#     见注意事项 2 与 1.2 的「换栈三步走」；填进 THIRD_PARTY_APPS 会展开成
+#     luci-app-<短名>，如 passwall → luci-app-passwall、dae → luci-app-dae；
+#     漏做「先停旧的」会被 build.sh 的互斥校验硬拦。
+#     microsocks / softethervpn / ipsec-vpnd / gost 是**服务端**，与 Clashoo 不冲突）---
+#   homeproxy                 passwall                  dae                       daed                      microsocks
+#   softethervpn              ipsec-vpnd                gost
 #
 # --- 内网穿透 / DDNS / 远程访问 ---
 #   zerotier                  ddns-go                   ngrokc                    nps                       n2n

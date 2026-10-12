@@ -398,7 +398,8 @@ DLLKIDS_KEY_URL="https://down.dllkids.xyz/openwrt-feed/keys/dllkids-feed.pub.pem
 > - `aarch64_generic` 必须与目标的 `ARCH_PACKAGES` 一致，否则 apk 会以架构不符拒绝。
 > - 25.12 的配置启用了 `CONFIG_SIGNATURE_CHECK`，**必须**提供公钥，
 >   否则安装时会报 `UNTRUSTED signature`。
-> - Clashoo 与 nikki 配置冲突，**不要同时集成**。
+> - Clashoo 与 nikki / openclash / passwall(2) / ssr-plus / homeproxy / dae(d) 等
+>   **配置冲突，不要同时集成** —— 详见下一节「代理插件互斥」。
 > - **该源与公钥也会随固件发布**，因此设备端可直接 `apk update` / `apk add` /
 >   `apk upgrade` 第三方系包。做法：`rockchip/build.sh` 除注入构建期用的
 >   `repositories` / `keys/` 之外，还把源与公钥写进 `files/`，随固件落到
@@ -406,6 +407,63 @@ DLLKIDS_KEY_URL="https://down.dllkids.xyz/openwrt-feed/keys/dllkids-feed.pub.pem
 >   （`customfeeds.list` 是 `apk` 包为「用户自加第三方源」预留的 conffile，
 >   上游默认就是三行注释占位；`CONFIG_SIGNATURE_CHECK=y`，设备端缺公钥会报
 >   `UNTRUSTED signature`。）
+
+### 代理插件互斥
+
+dllkids 源里所有**透明代理接管型**插件都只能启用**一个**。默认启用 Clashoo
+（主方案，双内核 mihomo + sing-box）；若想换成别的（例如 nikki、Daed），
+必须**先停旧的，再开新的**。
+
+**为什么不能双开**：这些插件每一套都会独自接管整个透明代理 ——
+各自写 nftables/iptables 的 `REDIRECT` / `TPROXY` 规则、各自劫持 DNS、
+抢占同一批端口（7890-7895 / 9090 / 1080 / 53 …）、各自注册 `/etc/init.d`
+脚本与 UCI 配置包。双开的后果是规则打架、LuCI 配置错乱、DNS 解析冲突 ——
+轻则无法科学上网，重则刷机后直接断网。
+
+**已核实存在于 dllkids 源、且互斥的代理栈**（18 个）：
+
+| 代理栈 | 标志包 |
+| --- | --- |
+| Clashoo（默认） | `luci-app-clashoo` / `clashoo` |
+| nikki | `luci-app-nikki` / `nikki` |
+| OpenClash | `luci-app-openclash` |
+| PassWall | `luci-app-passwall` |
+| PassWall2 | `luci-app-passwall2` |
+| SSR-Plus | `luci-app-ssr-plus` |
+| homeproxy | `luci-app-homeproxy` |
+| Daed 系 | `luci-app-dae` / `-daed` / `-daed-next` / `-daede` |
+| shadowsocks 系 | `luci-app-shadowsocks` / `-libev` / `-rust` |
+| redsocks 系 | `luci-app-redsocks` / `-redsocks2` |
+| xray | `luci-app-xray` |
+| v2raya | `v2raya` |
+
+**不算冲突**（可与其他栈共存）：`luci-app-xray-status`（xray 的配套状态页）、
+`microsocks` / `gost` / `softethervpn`（服务端）、`tun2socks`（助手）、
+`smartdns` / `mosdns` / `chinadns-ng` / `adguardhome`（DNS 层）、
+`geoview` / `v2ray-geoip` / `v2ray-geosite`（数据包）。
+
+**换栈三步走**（改 `shell/custom-packages.sh`）：
+
+1. 注释掉「一」里当前启用的 Clashoo 行；
+2. 取消目标栈那一行的注释（**只取消一行**）；
+3. 重跑构建。
+
+**不用靠记性 —— 构建期硬校验**：`rockchip/build.sh` 在合并完 `PACKAGES`
+之后会检查代理栈数量，检测到 ≥2 套就 **`exit 1`** 并打印是哪几套、怎么改：
+
+```
+ERROR: 检测到 2 套代理插件同时启用：clashoo nikki
+```
+
+确需同时安装（仅实验用途、不指望能上网）时可显式放行：
+
+```sh
+ALLOW_PROXY_CONFLICT=1 bash rockchip/build.sh
+```
+
+> ⚠ 校验用**整词**匹配，不会误判：`luci-app-passwall2` ≠ `luci-app-passwall`、
+> `luci-app-xray-status` ≠ `luci-app-xray`、`luci-app-daed-next` ≠ `luci-app-daed`。
+> 新增代理栈时，记得同步更新 `build.sh` 里的 `_PROXY_STACKS` 表。
 
 ### 预置软件包清单
 
@@ -461,7 +519,10 @@ BUILD_OFFICIAL_ONLY=1 bash rockchip/build.sh
 - 少数不是 `luci-app-<短名>` 形式的包（`luci-proto-*` / `luci-mod-*` /
   openclash）：在 2.3 取消对应行注释即可；passwall 用「三」B 组短名启用。
 
-第三方插件默认启用 Clashoo 一个。
+第三方插件默认启用 Clashoo 一个。想换成 dllkids 源里的其他代理（nikki / Daed /
+openclash / passwall(2) / ssr-plus / homeproxy …）请按
+[代理插件互斥](#代理插件互斥) 的「换栈三步走」操作 —— 先停旧的再开新的，
+漏做这一步会被 `build.sh` 的互斥校验直接拦下。
 
 ### 如何自行增加第三方源
 
@@ -565,6 +626,8 @@ LuCI 的「软件包」页安装/卸载软件同样经由 uci，所以那里也�
   官方 firewall4 没有 fullcone 选项，此前版本的 `fullcone='0'` 已移除。
   注意：日后若启用 passwall 等 TPROXY 透明代理插件，请**不要**在 LuCI 里开启
   流量卸载——flow offload 会让首包之后的流量走 fast path 绕过 netfilter 钩子。
+  （哪些插件属于这类、为什么它们之间只能启用一个，见
+  [代理插件互斥](#代理插件互斥)。）
 
 官方 `firewall4` 默认配置的关键部分
 （源：`openwrt/firewall4` 仓库 `root/etc/config/firewall`，25.12 所用版本
