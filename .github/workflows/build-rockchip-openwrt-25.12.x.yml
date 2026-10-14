@@ -87,6 +87,18 @@ jobs:
     # 用 ubuntu-latest（当前为 24.04）避免 brownout 期构建随机失败。
     runs-on: ubuntu-latest
 
+    # 用户输入统一经 env 中转，**不要**把 ${{ inputs.* }} 直接拼进 shell/heredoc：
+    # 输入含 " / $( ) / ; 时可注入命令。经 env 传递后仅作为环境变量值参与，
+    # 不进入 shell 解析；再配合下面的格式校验，注入面即被消除。
+    env:
+      IN_OPENWRT_VERSION: ${{ inputs.openwrt_version }}
+      IN_ROUTER_IP: ${{ inputs.custom_router_ip }}
+      IN_ROOTFS_PARTSIZE: ${{ inputs.rootfs_partsize }}
+      IN_WAN_PROTO: ${{ inputs.wan_proto }}
+      IN_WAN_IP: ${{ inputs.wan_ip }}
+      IN_WAN_GATEWAY: ${{ inputs.wan_gateway }}
+      IN_WAN_DNS: ${{ inputs.wan_dns }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -96,25 +108,43 @@ jobs:
 
       - name: Save Custom Router IP into OpenWrt files
         run: |
+          # 格式校验：仅接受 192.168.x.y 或 10.x.y.z（各段 0–255），非法直接失败。
+          OCT='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+          if ! printf '%s' "$IN_ROUTER_IP" | grep -Eq "^192\.168\.${OCT}\.${OCT}$|^10\.${OCT}\.${OCT}\.${OCT}$"; then
+            echo "Error: custom_router_ip 格式不合法：$IN_ROUTER_IP（应为 192.168.x.y 或 10.x.y.z）"
+            exit 1
+          fi
           mkdir -p "${{ github.workspace }}/custom"
-          echo "${{ inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
-          echo "R2S 管理地址:${{ inputs.custom_router_ip }}"
+          printf '%s\n' "$IN_ROUTER_IP" > "${{ github.workspace }}/custom/custom_router_ip.txt"
+          echo "R2S 管理地址:$IN_ROUTER_IP"
 
       - name: Validate WAN Inputs
         run: |
-          if [[ "${{ inputs.wan_proto }}" == "static" ]]; then
-            if [[ -z "${{ inputs.wan_ip }}" || -z "${{ inputs.wan_gateway }}" ]]; then
+          if [[ "$IN_WAN_PROTO" == "static" ]]; then
+            if [[ -z "$IN_WAN_IP" || -z "$IN_WAN_GATEWAY" ]]; then
               echo "Error: wan_proto=static 时 wan_ip 与 wan_gateway 均为必填项！"
               exit 1
             fi
-            echo "WAN 接入方式: static  地址: ${{ inputs.wan_ip }}  网关: ${{ inputs.wan_gateway }}  DNS: ${{ inputs.wan_dns }}"
+            # wan_ip / wan_gateway 必须为合法 IPv4；wan_dns 允许留空（留空用网关）
+            # 或空格分隔的多个 IPv4。
+            OCT='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+            IPV4="^${OCT}\.${OCT}\.${OCT}\.${OCT}$"
+            for _v in "$IN_WAN_IP" "$IN_WAN_GATEWAY"; do
+              printf '%s' "$_v" | grep -Eq "$IPV4" \
+                || { echo "Error: WAN 参数不是合法 IPv4：$_v"; exit 1; }
+            done
+            for _v in $IN_WAN_DNS; do
+              printf '%s' "$_v" | grep -Eq "$IPV4" \
+                || { echo "Error: wan_dns 含非 IPv4 值：$_v"; exit 1; }
+            done
+            echo "WAN 接入方式: static  地址: $IN_WAN_IP  网关: $IN_WAN_GATEWAY  DNS: $IN_WAN_DNS"
           else
             echo "WAN 接入方式: dhcp（官方默认，地址由上级设备分配，无需填写 wan_ip/wan_gateway）"
           fi
 
       - name: Building R2S OpenWrt 25.12.x
         run: |
-          rootfs_partsize="${{ inputs.rootfs_partsize }}"
+          rootfs_partsize="$IN_ROOTFS_PARTSIZE"
           case "$rootfs_partsize" in
             1G)
               ROOTFS_SIZE=1024
@@ -130,7 +160,7 @@ jobs:
               ;;
           esac
           echo "ROOTFS_SIZE=$ROOTFS_SIZE" >> $GITHUB_ENV
-          openwrt_version="${{ inputs.openwrt_version }}"
+          openwrt_version="$IN_OPENWRT_VERSION"
           echo "Building for profile: $PROFILE"
           # 官方 openwrt/imagebuilder 容器：
           #   - 工作目录为 /builder（ImmortalWrt 镜像是 /home/build/immortalwrt）
@@ -157,16 +187,16 @@ jobs:
               -v "${{ github.workspace }}/rockchip/build.sh:/builder/build.sh" \
               -e PROFILE="$PROFILE" \
               -e ROOTFS_PARTSIZE="$ROOTFS_SIZE" \
-              -e WAN_PROTO="${{ inputs.wan_proto }}" \
-              -e WAN_IP="${{ inputs.wan_ip }}" \
-              -e WAN_GATEWAY="${{ inputs.wan_gateway }}" \
-              -e WAN_DNS="${{ inputs.wan_dns }}" \
+              -e WAN_PROTO="$IN_WAN_PROTO" \
+              -e WAN_IP="$IN_WAN_IP" \
+              -e WAN_GATEWAY="$IN_WAN_GATEWAY" \
+              -e WAN_DNS="$IN_WAN_DNS" \
           openwrt/imagebuilder:rockchip-armv8-${openwrt_version} /bin/bash /builder/build.sh
 
       - name: Create info
         run: |
-          if [[ "${{ inputs.wan_proto }}" == "static" ]]; then
-            WAN_LINE="- 🌐 **WAN 接入**: 静态 IP ${{ inputs.wan_ip }} / 网关 ${{ inputs.wan_gateway }}"
+          if [[ "$IN_WAN_PROTO" == "static" ]]; then
+            WAN_LINE="- 🌐 **WAN 接入**: 静态 IP $IN_WAN_IP / 网关 $IN_WAN_GATEWAY"
           else
             WAN_LINE="- 🌐 **WAN 接入**: DHCP（由上级设备自动分配地址）"
           fi
@@ -175,8 +205,8 @@ jobs:
           ## 📡 R2S 固件信息
 
           - ✳️ **机型**: NanoPi R2S (Rockchip RK3328)
-          - 🏷️ **Image Builder 版本**: OpenWrt ${{ inputs.openwrt_version }}
-          - 🏠 **后台地址**: ${{ inputs.custom_router_ip }}
+          - 🏷️ **Image Builder 版本**: OpenWrt $IN_OPENWRT_VERSION
+          - 🏠 **后台地址**: $IN_ROUTER_IP
           ${WAN_LINE}
           - 🧬 **WAN6**: DHCPv6（用于获取 PD 前缀）
           - 👤 **用户名**: root
@@ -203,7 +233,7 @@ jobs:
       - name: Archive build as workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: r2s-openwrt-${{ inputs.openwrt_version }}-r${{ github.run_number }}
+          name: r2s-openwrt-${{ env.IN_OPENWRT_VERSION }}-r${{ github.run_number }}
           path: ${{ github.workspace }}/bin/targets/rockchip/armv8/*.img.gz
           if-no-files-found: error
           retention-days: 90
