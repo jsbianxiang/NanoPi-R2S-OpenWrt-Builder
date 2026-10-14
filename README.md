@@ -56,7 +56,7 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
 | --- | --- | --- | --- |
 | `.github/workflows/build-rockchip-openwrt-25.12.x.yml` | Build R2S OpenWrt 25.12.x | apk | 构建固件，默认 `25.12.5`；产物同时写入**滚动 Release**（tag `Autobuild`，永远只有一条）和 **Artifact 归档**（`r2s-openwrt-<版本>-r<序号>`，保留 90 天） |
 | `.github/workflows/verify-official-parity.yml` | Verify official-package parity | apk | 维护用：**只读**核对。用 `make manifest` 导出本项目的包列表，与官方 `openwrt-<版本>-rockchip-armv8.manifest` + 本机型 `device_packages` 做 `comm` 比对，出现缺口即 fail（不构建镜像、不发布任何产物） |
-| `.github/workflows/clean-workflow.yml` | Cleanup Old Workflow Runs | — | 维护用：手动清理旧的 Actions 运行记录（默认只保留最近 1 天）。⚠️ **删运行记录会连带删掉那次的 Artifact**，想留档请先下载，或把 `keep_days` 调大 |
+| `.github/workflows/clean-workflow.yml` | Cleanup Old Workflow Runs | — | 维护用：手动清理旧的 Actions 运行记录（默认保留最近 90 天，与 Artifact 保留期对齐）。⚠️ **删运行记录会连带删掉那次的 Artifact**，想留档请先下载，或把 `keep_days` 调大 |
 
 ### 工作流输入项
 

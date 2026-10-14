@@ -192,6 +192,11 @@ PACKAGES="$OFFICIAL_BASELINE $LOCAL_ADDITIONS"
 #   dllkids 的 argon 是 ImmortalWrt 生态编译包，在官方 OpenWrt 25.12 的 LuCI 上
 #   会导致 web UI 无法进入（argon 包自带 uci-defaults 自动把默认主题切成
 #   argon，渲染失败则连登录页都挂）。默认走官方 Bootstrap 主题。
+#   包级对照（2026-10-14 实测，已确认根因）：dllkids 的
+#   luci-theme-argon-27.246.46668~5076a6f 与 ImmortalWrt 官方
+#   luci-theme-argon-2.4.7-r20260824 的文件清单**完全一致**（同样 7 个 .ut 模板
+#   + /etc/uci-defaults/30_luci-theme-argon），且该 uci-defaults **逐字节相同**
+#   ⇒ 它确实是 ImmortalWrt 生态那一份，与官方 OpenWrt 的 LuCI 模板体系不匹配。
 #   仍想尝试的话取消下两行注释，并在 99-custom.sh 里显式钉死
 #   luci.main.mediaurlbase='/luci-static/bootstrap' 以便失败时可恢复。
 #PACKAGES="$PACKAGES luci-theme-argon"
