@@ -1,17 +1,44 @@
 #!/bin/bash
 # 构建期日志（注意：固件内的首启日志是 /etc/openwrt-builder/uci-defaults-log.txt，两者不是一回事）
-source shell/custom-packages.sh
+
+# 本脚本在官方 openwrt/imagebuilder 容器内运行，工作目录为 /builder。
+#
+# ⚠ cd 必须排在 source 之前。
+#   source 用的是**相对路径** shell/custom-packages.sh，而容器默认 WORKDIR 未必
+#   是 /builder（换镜像 tag、改 docker run 参数都会变）。原来的顺序是先 source
+#   再 cd：一旦 WORKDIR 不同，source 找不到文件 —— bash 的 source 失败**不会**
+#   让脚本退出，于是 $CUSTOM_PACKAGES 为空，构建照样绿，第三方包整批消失，
+#   日志里只有一行 "第三方APK软件包: "。这是「静默少包」最隐蔽的一种形态。
+BUILDER_DIR="/builder"
+cd "$BUILDER_DIR" || exit 1
+
+[ -f shell/custom-packages.sh ] || {
+    echo "ERROR: 找不到 shell/custom-packages.sh（当前目录 $(pwd)）" >&2
+    echo "       无法确定第三方包清单，拒绝继续构建。" >&2
+    exit 1
+}
+# shellcheck source=shell/custom-packages.sh
+source shell/custom-packages.sh || {
+    echo "ERROR: source shell/custom-packages.sh 失败，拒绝继续构建。" >&2
+    exit 1
+}
+
 echo "第三方APK软件包: $CUSTOM_PACKAGES"
 LOGFILE="/tmp/build.log"
 echo "Starting build.sh at $(date)" >> $LOGFILE
-# yml 传入的路由器型号 PROFILE
-echo "Building for profile: $PROFILE"
-# yml 传入的固件大小 ROOTFS_PARTSIZE
-echo "Building for ROOTFS_PARTSIZE: $ROOTFS_PARTSIZE"
 
-# 本脚本在官方 openwrt/imagebuilder 容器内运行，工作目录为 /builder。
-BUILDER_DIR="/builder"
-cd "$BUILDER_DIR" || exit 1
+# yml 传入的路由器型号 PROFILE
+: "${PROFILE:?PROFILE 未设置（应为 friendlyarm_nanopi-r2s）}"
+echo "Building for profile: $PROFILE"
+
+# yml 传入的固件大小 ROOTFS_PARTSIZE（MiB）。
+# 为空时给个安全默认：workflow 的 case 若没命中分支，会把空串传到这里，
+# `make image ROOTFS_PARTSIZE=` 的结果是分区尺寸变成 0，产物直接不可用。
+if [ -z "$ROOTFS_PARTSIZE" ]; then
+    ROOTFS_PARTSIZE=1024
+    echo "⚠️ ROOTFS_PARTSIZE 为空，回落到默认值 ${ROOTFS_PARTSIZE} MiB" >&2
+fi
+echo "Building for ROOTFS_PARTSIZE: $ROOTFS_PARTSIZE"
 
 # ---------------------------------------------------------------------------
 # 构建期注入目录：/etc/openwrt-builder/
@@ -542,15 +569,30 @@ if [ -f repositories ]; then
     # 只取官方行：此时 repositories 已被追加过 dllkids 源（见上方注入逻辑），
     # 而 dllkids 源已单独写在 customfeeds.list——若不过滤，设备端会重复声明
     # 同一第三方源，且「官方备份」也不再纯官方。
-    grep -E '^https://downloads\.openwrt\.org/' repositories \
-        > files/etc/apk/repositories.d/distfeeds.list.official.bak
-    sed 's#https://downloads\.openwrt\.org/releases/#https://mirrors.ustc.edu.cn/openwrt/releases/#g' \
-        files/etc/apk/repositories.d/distfeeds.list.official.bak \
-        > files/etc/apk/repositories.d/distfeeds.list
-    echo "---- 设备端官方源备份（distfeeds.list.official.bak）----"
-    cat files/etc/apk/repositories.d/distfeeds.list.official.bak
-    echo "---- 设备端 distfeeds.list（已切换中科大镜像）----"
-    cat files/etc/apk/repositories.d/distfeeds.list
+    #
+    # 用 `https\?://` 而不是写死 `https://`：IB 的 repositories 是容器自带文件，
+    # 协议随 IB 版本变过，写死一种会一条都匹配不到。
+    grep -E '^https?://downloads\.openwrt\.org/' repositories \
+        > files/etc/apk/repositories.d/distfeeds.list.official.bak || true
+
+    # ⚠ 空文件保护，别删这段。
+    # 若上面一条都没匹配到（IB 换域名 / 换协议 / 换文件格式），继续往下走就会
+    # 把设备端 distfeeds.list 写成**空文件** —— 固件里将没有任何官方源，
+    # `apk update` / `apk add` 只能用第三方源，而且 sysupgrade 之后也回不来。
+    # 这种情况宁可不改，让设备保持官方默认源。
+    if [ ! -s files/etc/apk/repositories.d/distfeeds.list.official.bak ]; then
+        echo "⚠️ repositories 里没有 downloads.openwrt.org 的官方行，设备端源保持官方默认" >&2
+        rm -f files/etc/apk/repositories.d/distfeeds.list \
+              files/etc/apk/repositories.d/distfeeds.list.official.bak
+    else
+        sed 's#https\?://downloads\.openwrt\.org/releases/#https://mirrors.ustc.edu.cn/openwrt/releases/#g' \
+            files/etc/apk/repositories.d/distfeeds.list.official.bak \
+            > files/etc/apk/repositories.d/distfeeds.list
+        echo "---- 设备端官方源备份（distfeeds.list.official.bak）----"
+        cat files/etc/apk/repositories.d/distfeeds.list.official.bak
+        echo "---- 设备端 distfeeds.list（已切换中科大镜像）----"
+        cat files/etc/apk/repositories.d/distfeeds.list
+    fi
 else
     echo "⚠️ 未找到 Image Builder 的 repositories 文件，设备端源保持官方默认" >&2
 fi
@@ -575,11 +617,87 @@ echo "去重后待安装包数: $(echo $PACKAGES | wc -w)"
 # 防止将来镜像变化导致 dllkids 包被 --allow-untrusted 静默放过未验签。
 grep -q '^CONFIG_SIGNATURE_CHECK=y' .config || echo 'CONFIG_SIGNATURE_CHECK=y' >> .config
 
-make image PROFILE=$PROFILE PACKAGES="$PACKAGES" FILES="$BUILDER_DIR/files" ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE
+# =========================================================
+# 构建后断言：$PACKAGES 里的包是否**真的**进了镜像
+# ---------------------------------------------------------
+# 为什么需要这段 —— Image Builder 对「找不到的包」是**跳过并继续**：
+#   target/imagebuilder/files/Makefile 的 package_install 里对 apk 的
+#   "not found" 只打一行 WARNING，make image 仍然返回 0。
+#   结果是：构建绿、Release 正常发布、刷完才发现某个功能没了，
+#   而日志里那行 WARNING 早被几百行输出淹掉。
+#   包名拼错、第三方源下架、i18n 包被 app 包覆盖冲突……都会走到这条路上。
+#
+# 判据：镜像产出的 manifest（bin/targets/rockchip/armv8/*.manifest）里
+#   必须能按**整词**找到 $PACKAGES 的每一项。
+#
+# 两个逃生口：
+#   PKG_VERIFY_ALLOW="a b c"   把确认属于「虚拟包/改名」的包加入白名单
+#                              （例：mihomo 由 mihomo-meta 提供时，manifest 里
+#                               只会出现提供者，不会出现 mihomo 本身）
+#   PKG_VERIFY=warn            只提示不阻断（排查阶段用，别长期开着）
+# =========================================================
+verify_manifest() {
+    local manifest installed missing="" p
 
-if [ $? -ne 0 ]; then
+    manifest="$(ls -1 bin/targets/rockchip/armv8/*.manifest 2>/dev/null | head -1)"
+    if [ -z "$manifest" ]; then
+        echo "⚠️ 未找到 manifest（bin/targets/rockchip/armv8/*.manifest），跳过包核对" >&2
+        return 0
+    fi
+
+    installed="$(awk '{print $1}' "$manifest" | sort -u)"
+    echo "---- 核对 $(basename "$manifest")：已装 $(printf '%s\n' "$installed" | wc -l) 个包 ----"
+
+    for p in $PACKAGES; do
+        case " ${PKG_VERIFY_ALLOW:-} " in
+            *" $p "*) echo "  ↷ 跳过（白名单）：$p"; continue ;;
+        esac
+        printf '%s\n' "$installed" | grep -qxF -- "$p" \
+            || missing="${missing}${missing:+ }${p}"
+    done
+
+    if [ -n "$missing" ]; then
+        {
+            echo ""
+            echo "=============================================================="
+            echo "ERROR: 以下包写在 PACKAGES 里，但没出现在镜像 manifest 中："
+            echo "   $missing"
+            echo "--------------------------------------------------------------"
+            echo "Image Builder 对找不到的包是「跳过并继续」—— make image 返回 0，"
+            echo "日志只有一行 WARNING，构建照样绿，但固件里少了这些包。"
+            echo ""
+            echo "常见原因："
+            echo "  1) 包名拼错，或该版本源里确实没有（换 openwrt_version 再试）"
+            echo "  2) 第三方包没注入对应源（dllkids），或该包已从源里下架"
+            echo "  3) 该名字是虚拟包，实际装进来的是提供者"
+            echo "     （如 mihomo -> mihomo-meta；luci-app-x -> luci-app-x-<版本>）"
+            echo ""
+            echo "确认属于第 3 种（虚拟包/改名）时，加白名单放行："
+            echo "  PKG_VERIFY_ALLOW=\"<包名> ...\" bash rockchip/build.sh"
+            echo "只想先看看、不阻断构建："
+            echo "  PKG_VERIFY=warn bash rockchip/build.sh"
+            echo "=============================================================="
+            echo ""
+        } >&2
+        if [ "${PKG_VERIFY:-fail}" = "warn" ]; then
+            echo "⚠ PKG_VERIFY=warn：仅提示，继续。" >&2
+            return 0
+        fi
+        return 1
+    fi
+
+    echo "✅ 包核对通过：PACKAGES 里的 $(echo $PACKAGES | wc -w) 个包全部在镜像中"
+    return 0
+}
+
+if ! make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES="$BUILDER_DIR/files" ROOTFS_PARTSIZE="$ROOTFS_PARTSIZE"; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed!"
     exit 1
 fi
+
+verify_manifest || {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Package verification failed!"
+    exit 1
+}
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."

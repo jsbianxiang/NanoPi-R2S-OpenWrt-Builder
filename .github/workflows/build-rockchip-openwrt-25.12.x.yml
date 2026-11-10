@@ -24,7 +24,7 @@ on:
       openwrt_version:
         description: "选择 OpenWrt 版本（Image Builder 版本）"
         required: false
-        default: "25.12.5"
+        default: "25.12.6"
         type: choice
         options:
           - 25.12.0
@@ -33,6 +33,7 @@ on:
           - 25.12.3
           - 25.12.4
           - 25.12.5
+          - 25.12.6
       custom_router_ip:
         description: "R2S 管理地址(LAN) 格式:192.168.x.1 或 10.x.x.1"
         required: true
@@ -100,6 +101,11 @@ jobs:
       IN_WAN_IP: ${{ inputs.wan_ip }}
       IN_WAN_GATEWAY: ${{ inputs.wan_gateway }}
       IN_WAN_DNS: ${{ inputs.wan_dns }}
+      # 构建后包断言的逃生口（见 rockchip/build.sh 的 verify_manifest）。
+      # 仓库变量 Settings → Secrets and variables → Actions → Variables 里
+      # 新建 PKG_VERIFY_ALLOW（空格分隔的包名）即可放行「虚拟包/改名」的情形，
+      # 不需要改代码。未设置时为空字符串，断言按默认（缺失即失败）执行。
+      PKG_VERIFY_ALLOW: ${{ vars.PKG_VERIFY_ALLOW }}
 
     steps:
       - name: Checkout code
@@ -160,8 +166,15 @@ jobs:
             4G)
               ROOTFS_SIZE=4096
               ;;
+            # 兜底分支不能省：choice 类型虽限制了取值，但一旦将来改了 options
+            # 忘了改 case，ROOTFS_SIZE 会是空串 —— `make image ROOTFS_PARTSIZE=`
+            # 会把分区做成 0 字节，产物刷上去直接不可用，而构建是绿的。
+            *)
+              echo "Error: 无法识别的 rootfs_partsize：'$rootfs_partsize'（支持 1G/2G/3G/4G）"
+              exit 1
+              ;;
           esac
-          echo "ROOTFS_SIZE=$ROOTFS_SIZE" >> $GITHUB_ENV
+          echo "ROOTFS_SIZE=$ROOTFS_SIZE" >> "$GITHUB_ENV"
           openwrt_version="$IN_OPENWRT_VERSION"
           echo "Building for profile: $PROFILE"
           # 官方 openwrt/imagebuilder 容器：
@@ -193,6 +206,7 @@ jobs:
               -e WAN_IP="$IN_WAN_IP" \
               -e WAN_GATEWAY="$IN_WAN_GATEWAY" \
               -e WAN_DNS="$IN_WAN_DNS" \
+              -e PKG_VERIFY_ALLOW="$PKG_VERIFY_ALLOW" \
           openwrt/imagebuilder:rockchip-armv8-${openwrt_version} /bin/bash /builder/build.sh
 
       - name: Create info

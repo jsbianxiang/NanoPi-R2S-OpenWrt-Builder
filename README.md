@@ -24,7 +24,7 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
 机型已固定在工作流的 `env.PROFILE` 中，**不再提供机型下拉选择**。
 
 > 本仓库**只支持 OpenWrt 25.12.x（apk 包管理）**，
-> 支持 25.12.0 ~ 25.12.5（当前系列最新为 25.12.5）。
+> 支持 25.12.0 ~ 25.12.6（当前系列最新为 25.12.6）。
 
 ---
 
@@ -54,7 +54,7 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
 
 | 工作流文件 | 名称 | 包管理 | 说明 |
 | --- | --- | --- | --- |
-| `.github/workflows/build-rockchip-openwrt-25.12.x.yml` | Build R2S OpenWrt 25.12.x | apk | 构建固件，默认 `25.12.5`；产物同时写入**滚动 Release**（tag `Autobuild`，永远只有一条）和 **Artifact 归档**（`r2s-openwrt-<版本>-r<序号>`，保留 90 天） |
+| `.github/workflows/build-rockchip-openwrt-25.12.x.yml` | Build R2S OpenWrt 25.12.x | apk | 构建固件，默认 `25.12.6`；产物同时写入**滚动 Release**（tag `Autobuild`，永远只有一条）和 **Artifact 归档**（`r2s-openwrt-<版本>-r<序号>`，保留 90 天） |
 | `.github/workflows/verify-official-parity.yml` | Verify official-package parity | apk | 维护用：**只读**核对。用 `make manifest` 导出本项目的包列表，与官方 `openwrt-<版本>-rockchip-armv8.manifest` + 本机型 `device_packages` 做 `comm` 比对，出现缺口即 fail（不构建镜像、不发布任何产物） |
 | `.github/workflows/clean-workflow.yml` | Cleanup Old Workflow Runs | — | 维护用：手动清理旧的 Actions 运行记录（默认保留最近 90 天，与 Artifact 保留期对齐）。⚠️ **删运行记录会连带删掉那次的 Artifact**，想留档请先下载，或把 `keep_days` 调大 |
 
@@ -62,7 +62,7 @@ NanoPi R2S 专用：基于 GitHub Actions + **OpenWrt 官方 Image Builder** 的
 
 | 输入 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `openwrt_version` | 否 | `25.12.5` | OpenWrt / Image Builder 版本（25.12.0 ~ 25.12.5） |
+| `openwrt_version` | 否 | `25.12.6` | OpenWrt / Image Builder 版本（25.12.0 ~ 25.12.6） |
 | `custom_router_ip` | 是 | `192.168.2.1` | LAN 管理地址，格式 `192.168.x.1` 或 `10.x.x.1` |
 | `rootfs_partsize` | 是 | `1G` | 软件包空间大小（1G / 2G / 3G / 4G） |
 | `wan_proto` | 是 | `dhcp` | WAN 接入方式（`dhcp` 官方默认 / `static` 静态 IP） |
@@ -529,6 +529,27 @@ BUILD_OFFICIAL_ONLY=1 bash rockchip/build.sh
 在 `openwrt/imagebuilder:rockchip-armv8-<版本>` 容器里跑 `make manifest`（**不打镜像**，
 只列出会被装进去的包），再拉官方 manifest + `profiles.json` 做差集，
 缺口非空就 `exit 1`，结果同时写进该次运行的 Summary。全程只读、不发布产物。
+
+#### 构建期包断言（防「绿着少包」）
+
+上面那个工作流只核对 **A 层**。B / C 层（尤其第三方包）还有另一类风险：
+**Image Builder 对找不到的包是「跳过并继续」** —— `make image` 返回 0，
+日志里只有一行 WARNING，构建绿、Release 照发，刷完才发现功能没了。
+
+所以 `rockchip/build.sh` 在 `make image` 成功之后会读镜像产出的
+`bin/targets/rockchip/armv8/*.manifest`，把 `$PACKAGES` 里的每一项按**整词**
+核对一遍，缺任何一个直接 `exit 1` 并列出缺的是哪些。
+
+判定为「虚拟包 / 改名」（例如 `mihomo` 实际由 `mihomo-meta` 提供，manifest 里
+只会有提供者）时，用白名单放行，**不要**为此去掉断言：
+
+```sh
+PKG_VERIFY_ALLOW="mihomo" bash rockchip/build.sh   # 放行指定包名
+PKG_VERIFY=warn bash rockchip/build.sh             # 只提示不阻断（排查用）
+```
+
+在 Actions 里跑的话不用改代码：仓库 **Settings → Secrets and variables → Actions
+→ Variables** 里新建 `PKG_VERIFY_ALLOW`（空格分隔的包名），工作流会把它传进容器。
 
 #### B / C 层的可选项
 
